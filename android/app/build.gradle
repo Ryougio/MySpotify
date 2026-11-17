@@ -12,8 +12,6 @@ android {
         targetSdk 34
         versionCode 429
         versionName "0.4.29"
-
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
