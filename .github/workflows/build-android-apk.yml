@@ -75,15 +75,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.32
-          name: "MySpotify Mobile Edition (Spotify Android 9.1.98 Parity v0.4.32)"
+          tag_name: mobile-v0.4.33
+          name: "MySpotify Mobile Edition (v0.4.33 - Google Login Fix & Cookie Login)"
           body: |
-            ### MySpotify Android 客户端 (Spotify Android 官方原生交互复刻版)
-            - **官方原版暗黑美学 (#121212)**：基于 Spotify Android (9.1.98) 真实逆向结构与视觉系统，彻底重构移动端体验。
-            - **经典 3-Tab 底部导航**：首页 (Home)、搜索 (Search)、你的音乐库 (Your Library)。
-            - **浮动迷你播放条 (Now Playing Bar)**：圆角浮动卡片停靠于底栏上方，集成封面、歌曲、点赞、播放控制与底部细线进度条。
-            - **沉浸式全屏播放页 (Activity Now Playing)**：动态封面流光背景、大封面、Scrubber 进度条、Spotify 标志性 5 键控制集群与交互式双语逐字歌词卡片。
-            - **真实云端同步**：基于 TOTP HMAC-SHA1 签名与 Pathfinder GraphQL（libraryV3、profileAttributes、fetchLibraryTracks、searchTracks）。
+            ### MySpotify Android 客户端 (v0.4.33 更新)
+            - **Google 登录兼容性优化**：优化 WebView 请求头与 User-Agent，剔除 `; wv` 与 `Version/4.0` 标识，避免 Google 拦截，并支持 OAuth 弹窗。
+            - **新增手动 Cookie (sp_dc) 登录通道**：登录页面与设置页面均新增「Cookie 登录」，支持直接粘贴 `sp_dc` 秒速登录，彻底告别网页安全拦截。
+            - **官方原版暗黑美学 (#121212)**：3-Tab 底部导航、浮动迷你播放条、沉浸式全屏播放器与双语逐行滚动歌词。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:

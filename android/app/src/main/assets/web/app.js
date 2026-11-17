@@ -899,6 +899,16 @@
 
         // 设置动作
         document.getElementById("btnActionLogin").addEventListener("click", () => Native.login());
+        document.getElementById("btnActionCookieLogin")?.addEventListener("click", () => {
+            const spDc = prompt("请输入或粘贴 Spotify 的 sp_dc Cookie 字符串：\n\n【技巧提示】\n1. 若 Google 登录提示浏览器不安全，可在浏览器访问 spotify.com/password-reset 使用 Google 邮箱设置独立密码，即可用邮箱密码直接登录！\n2. 或在手机/电脑浏览器登录 open.spotify.com，在 Cookie 中复制 sp_dc 属性值粘贴于此。");
+            if (spDc && spDc.trim()) {
+                if (window.AndroidBridge && window.AndroidBridge.setSpDc) {
+                    window.AndroidBridge.setSpDc(spDc.trim());
+                } else {
+                    Native.toast("当前环境不支持保存 Cookie");
+                }
+            }
+        });
         document.getElementById("btnActionSync").addEventListener("click", () => syncSpotifyData(true));
         document.getElementById("btnActionLogout").addEventListener("click", () => {
             Native.logout();

@@ -70,6 +70,31 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public boolean setSpDc(String spDc) {
+        if (spDc == null || spDc.trim().isEmpty()) return false;
+        String clean = spDc.trim();
+        if (clean.contains("sp_dc=")) {
+            clean = clean.substring(clean.indexOf("sp_dc=") + 6);
+            if (clean.contains(";")) {
+                clean = clean.substring(0, clean.indexOf(";"));
+            }
+            clean = clean.trim();
+        }
+        if (clean.isEmpty()) return false;
+
+        SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit()
+                .putString(SpotifyLoginActivity.KEY_SP_DC, clean)
+                .putString(SpotifyLoginActivity.KEY_ALL_COOKIES, "sp_dc=" + clean + "; Domain=.spotify.com; Path=/")
+                .apply();
+        activity.runOnUiThread(() -> {
+            showToast("Cookie 导入成功，正在同步账号...");
+            webView.evaluateJavascript("if (window.onNativeLoginSuccess) window.onNativeLoginSuccess(true);", null);
+        });
+        return true;
+    }
+
+    @JavascriptInterface
     public void fetchAccessToken(String callbackFn) {
         SpotifyApiClient.getAccessToken(activity, new SpotifyApiClient.ApiCallback() {
             @Override
