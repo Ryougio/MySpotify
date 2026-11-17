@@ -45,11 +45,15 @@ jobs:
         run: |
           cd android
           gradle assembleDebug --stacktrace --no-daemon > ../build.log 2>&1 || {
-            echo "::error title=FirstError::$(grep -m 1 -E 'error:|FAILED|Exception' ../build.log | tr -d '\r\n')"
-            echo "::error title=Cause::$(grep -m 1 -A 2 'Caused by:' ../build.log | tr '\r\n' ' ')"
-            echo "::error title=WhatWentWrong::$(grep -m 1 -A 2 'What went wrong:' ../build.log | tr '\r\n' ' ')"
-            cat ../build.log
-            exit 1
+            echo "First build attempt hit transient network issue, retrying in 5 seconds..."
+            sleep 5
+            gradle assembleDebug --stacktrace --no-daemon > ../build.log 2>&1 || {
+              echo "::error title=FirstError::$(grep -m 1 -E 'error:|FAILED|Exception' ../build.log | tr -d '\r\n')"
+              echo "::error title=Cause::$(grep -m 1 -A 2 'Caused by:' ../build.log | tr '\r\n' ' ')"
+              echo "::error title=WhatWentWrong::$(grep -m 1 -A 2 'What went wrong:' ../build.log | tr '\r\n' ' ')"
+              cat ../build.log
+              exit 1
+            }
           }
 
       - name: Upload Build Log
