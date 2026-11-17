@@ -36,17 +36,17 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
+          cache-disabled: true
 
       - name: Build Android APK (Debug)
         run: |
           cd android
-          gradle wrapper --gradle-version 8.7
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon > ../build.log 2>&1 || (
-            echo "::error::Gradle build failed, printing log..."
+          gradle assembleDebug --stacktrace --no-daemon > ../build.log 2>&1 || {
+            ERR_SNIP=$(tail -n 25 ../build.log | tr '\r\n' ' ' | head -c 1200)
+            echo "::error title=GradleBuildFailure::$ERR_SNIP"
             cat ../build.log
             exit 1
-          )
+          }
 
       - name: Upload Build Log
         if: always()
