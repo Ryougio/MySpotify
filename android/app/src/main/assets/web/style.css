@@ -1539,3 +1539,98 @@ html, body {
     color: var(--sp-text-subdued);
     margin-top: -4px;
 }
+
+
+/* ==========================================================================
+   v0.4.37 上游同步新增样式：歌单内筛选 / 6段均衡器 / 音质徽章 / 倍速播放
+   ========================================================================== */
+
+/* 歌单内筛选框 */
+.playlist-filter-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 16px 12px 16px;
+    padding: 8px 12px;
+    background: #242424;
+    border-radius: 8px;
+    color: var(--sp-text-subdued);
+}
+.playlist-filter-wrap input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    outline: none;
+}
+.playlist-filter-wrap input::placeholder {
+    color: #888888;
+}
+
+/* 音质徽章 (v0.4.36) */
+.np-title-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+}
+.sp-quality-badge {
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--sp-green);
+    border: 1px solid rgba(30, 215, 96, 0.5);
+    background: rgba(30, 215, 96, 0.12);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+}
+
+/* 设置页下拉框 & 6段均衡器 (v0.4.36) */
+.sp-select {
+    background: #282828;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    outline: none;
+}
+.eq-bands-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #1b1b1b;
+    border-radius: 10px;
+}
+.eq-band-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.eq-band-freq {
+    width: 48px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--sp-text-subdued);
+    text-align: right;
+    flex-shrink: 0;
+}
+.eq-band-slider {
+    flex: 1;
+    accent-color: var(--sp-green);
+    height: 4px;
+}
+.eq-band-val {
+    width: 44px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    flex-shrink: 0;
+}

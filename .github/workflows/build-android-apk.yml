@@ -75,16 +75,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.34
-          name: "MySpotify Mobile Edition (v0.4.34 - Full Desktop API Parity & UX Overhaul)"
+          tag_name: mobile-v0.4.37
+          name: "MySpotify Mobile Edition (v0.4.37 - Upstream Sync: Equalizer, Quality Badge, Daily Mix Fallback, Playlist Filter & Speed)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.34 重磅功能完整版)
-            - **1. Android 系统返回栈**：全面支持返回键与侧滑返回逐级退回（收起歌词 → 收起播放页 → 返回上一级页面 → 回到首页 → 双击退出），不再直接退回桌面。
-            - **2. 丝滑可拖拽进度条 + 真实队列上下曲**：支持移动端 Touch 拖拽与精准点按进度条，拖拽期间防原生回调跳动，新增真实播放队列上下曲切换。
-            - **3. 首页与音乐库过滤全部实装**：首页「全部 / 音乐 / 播客」真实对接 Spotify `home` (`facet`) 接口；音乐库「全部 / 播放列表 / 专辑 / 艺人」完整解析并支持点击进入详情。
-            - **4. 多维度搜索 + 艺人主页关注 + 分类推荐歌单**：搜索同步桌面端展示圆形艺人头像、专辑、歌单与歌曲；点击艺人进入专属艺人主页（支持「关注 / 已关注」、热门歌曲、发行专辑、相关艺人）；浏览全部改用真实 `browseAll` / `browsePage` 展示对应流派精选歌单。
-            - **5. 桌面端核心频道完整移植**：彻底移除硬编码占位歌曲，首页接入真实 Spotify 为你推荐，并完整实现「每日推荐」、「Spotify 官方排行榜（全球/台湾/香港/日本/韩国等）」、「最近播放」、「浏览」全部页面。
-            - **6. 全量分页同步**：`libraryV3`、`fetchLibraryTracks`（我喜欢的音乐）、`fetchPlaylist`、`getAlbum` 全部启用完整自动分页拉取，彻底解决歌单与喜欢歌曲同步不全问题。
+            ### MySpotify Android 客户端 (v0.4.37 上游全量同步版)
+            - **同步上游 v0.4.37 & v0.4.35（每日推荐防丢与兜底分页）**：修复首页当天无 Daily Mix 导致推荐为空的问题，自动分页检索「为你打造（Made For You）」页面并本地缓存上次每日推荐。
+            - **同步上游 v0.4.36（6 段原生硬件均衡器 + 22 预设）**：基于 Android 原生 `AudioEffect Equalizer`，在「设置 › 均衡器」完整复刻桌面端 6 频段（60Hz~15kHz）与 22 个官方预设（低音增强/人声增强/摇滚/流行/古典/电子/爵士等）。
+            - **同步上游 v0.4.36（音质徽章）**：播放页歌名旁实时展示当前音质标识（`256k` / `HQ`）。
+            - **同步上游 v0.4.30（歌单内快速筛选）**：歌单超过 12 首时自动显示多词空格搜索筛选框，点击播放仅播放筛选匹配队列。
+            - **同步上游 v0.4.28（倍速播放）**：全屏播放页支持 `0.5×` ~ `2.0×` 变速不变调播放。
+            - **包含 v0.4.34 全部移动端增强**：Android 逐级返回栈、触控可拖拽进度条、首页音乐/播客过滤、音乐库专辑/艺人切换、多维度搜索与艺人主页关注、官方排行榜、最近播放及全量分页同步。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:

@@ -15,6 +15,8 @@ import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.media.PlaybackParams;
+import android.media.audiofx.Equalizer;
 import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.Build;
@@ -49,6 +51,8 @@ public class MediaPlaybackService extends Service implements
     public static final String ACTION_PREV = "dev.margbug.vinyl.PREV";
     public static final String ACTION_STOP = "dev.margbug.vinyl.STOP";
     public static final String ACTION_SEEK = "dev.margbug.vinyl.SEEK";
+    public static final String ACTION_SET_EQ = "dev.margbug.vinyl.SET_EQ";
+    public static final String ACTION_SET_SPEED = "dev.margbug.vinyl.SET_SPEED";
 
     private static final String CHANNEL_ID = "vinyl_playback_channel";
     private static final int NOTIFICATION_ID = 1001;
@@ -66,6 +70,11 @@ public class MediaPlaybackService extends Service implements
     }
 
     private MediaPlayer mediaPlayer;
+    private Equalizer equalizer;
+    private boolean eqEnabled = false;
+    private float[] eqGains = new float[]{0f, 0f, 0f, 0f, 0f, 0f};
+    private float playbackSpeed = 1.0f;
+    private static final int[] EQ_BANDS_HZ = new int[]{60, 150, 400, 1000, 2400, 15000};
     private MediaSessionCompat mediaSession;
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
@@ -222,6 +231,17 @@ public class MediaPlaybackService extends Service implements
         } else if (ACTION_SEEK.equals(action)) {
             int positionMs = intent.getIntExtra("positionMs", 0);
             seekTo(positionMs);
+        } else if (ACTION_SET_EQ.equals(action)) {
+            eqEnabled = intent.getBooleanExtra("enabled", false);
+            float[] gains = intent.getFloatArrayExtra("gains");
+            if (gains != null && gains.length == 6) {
+                eqGains = gains;
+            }
+            applyEqualizer();
+        } else if (ACTION_SET_SPEED.equals(action)) {
+            float speed = intent.getFloatExtra("speed", 1.0f);
+            playbackSpeed = Math.max(0.5f, Math.min(3.0f, speed));
+            applyPlaybackSpeed();
         } else if (ACTION_STOP.equals(action)) {
             stopPlayback();
         }
@@ -283,8 +303,63 @@ public class MediaPlaybackService extends Service implements
         }
     }
 
+    private void applyEqualizer() {
+        try {
+            if (mediaPlayer == null) return;
+            int sessionId = mediaPlayer.getAudioSessionId();
+            if (sessionId <= 0) return;
+            if (equalizer == null) {
+                equalizer = new Equalizer(0, sessionId);
+            }
+            equalizer.setEnabled(eqEnabled);
+            if (!eqEnabled) return;
+
+            short numBands = equalizer.getNumberOfBands();
+            short[] range = equalizer.getBandLevelRange();
+            short minLevel = range[0];
+            short maxLevel = range[1];
+
+            for (short b = 0; b < numBands; b++) {
+                int centerHz = equalizer.getCenterFreq(b) / 1000;
+                // Map device center frequency to nearest of our 6 bands
+                int nearestIdx = 0;
+                double bestDiff = Double.MAX_VALUE;
+                for (int i = 0; i < EQ_BANDS_HZ.length; i++) {
+                    double diff = Math.abs(Math.log((double) Math.max(1, centerHz)) - Math.log((double) EQ_BANDS_HZ[i]));
+                    if (diff < bestDiff) {
+                        bestDiff = diff;
+                        nearestIdx = i;
+                    }
+                }
+                short targetMb = (short) Math.round(eqGains[nearestIdx] * 100.0f);
+                if (targetMb < minLevel) targetMb = minLevel;
+                if (targetMb > maxLevel) targetMb = maxLevel;
+                equalizer.setBandLevel(b, targetMb);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void applyPlaybackSpeed() {
+        try {
+            if (mediaPlayer != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PlaybackParams params = mediaPlayer.getPlaybackParams();
+                if (params == null) params = new PlaybackParams();
+                params.setSpeed(playbackSpeed);
+                mediaPlayer.setPlaybackParams(params);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     public void stopPlayback() {
         progressHandler.removeCallbacks(progressRunnable);
+        if (equalizer != null) {
+            try { equalizer.release(); } catch (Exception ignored) {}
+            equalizer = null;
+        }
         if (mediaPlayer != null) {
             mediaPlayer.stop();
             mediaPlayer.release();
@@ -302,7 +377,11 @@ public class MediaPlaybackService extends Service implements
 
     @Override
     public void onPrepared(MediaPlayer mp) {
+        applyEqualizer();
         mp.start();
+        if (playbackSpeed != 1.0f) {
+            applyPlaybackSpeed();
+        }
         isPlaying = true;
         progressHandler.post(progressRunnable);
         updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, 0);

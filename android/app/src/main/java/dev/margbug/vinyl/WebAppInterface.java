@@ -336,6 +336,51 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public void setEqualizer(boolean enabled, String gainsJson) {
+        try {
+            float[] gains = new float[]{0f, 0f, 0f, 0f, 0f, 0f};
+            if (gainsJson != null && !gainsJson.isEmpty()) {
+                org.json.JSONArray arr = new org.json.JSONArray(gainsJson);
+                for (int i = 0; i < Math.min(6, arr.length()); i++) {
+                    gains[i] = (float) arr.optDouble(i, 0.0);
+                }
+            }
+            SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit()
+                    .putBoolean("eq_enabled", enabled)
+                    .putString("eq_gains", gainsJson != null ? gainsJson : "[0,0,0,0,0,0]")
+                    .apply();
+
+            Intent intent = new Intent(activity, MediaPlaybackService.class);
+            intent.setAction(MediaPlaybackService.ACTION_SET_EQ);
+            intent.putExtra("enabled", enabled);
+            intent.putExtra("gains", gains);
+            activity.startService(intent);
+        } catch (Exception ignored) {}
+    }
+
+    @JavascriptInterface
+    public String getEqualizer() {
+        try {
+            SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+            JSONObject obj = new JSONObject();
+            obj.put("enabled", prefs.getBoolean("eq_enabled", false));
+            obj.put("gains", new org.json.JSONArray(prefs.getString("eq_gains", "[0,0,0,0,0,0]")));
+            return obj.toString();
+        } catch (Exception e) {
+            return "{\"enabled\":false,\"gains\":[0,0,0,0,0,0]}";
+        }
+    }
+
+    @JavascriptInterface
+    public void setPlaybackSpeed(float speed) {
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_SET_SPEED);
+        intent.putExtra("speed", speed);
+        activity.startService(intent);
+    }
+
+    @JavascriptInterface
     public void stopPlaybackService() {
         Intent intent = new Intent(activity, MediaPlaybackService.class);
         intent.setAction(MediaPlaybackService.ACTION_STOP);

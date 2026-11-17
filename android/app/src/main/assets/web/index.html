@@ -219,6 +219,14 @@
                     </div>
                 </div>
 
+                <div class="playlist-filter-wrap" id="playlistFilterWrap" style="display:none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+                    </svg>
+                    <input type="text" id="playlistFilterInput" placeholder="在歌单中筛选歌名、歌手、专辑（空格分隔多词）..." autocomplete="off">
+                    <button class="clear-search-btn" id="btnClearPlaylistFilter" style="display:none;">&times;</button>
+                </div>
+
                 <div class="sp-tracks-list" id="playlistTracksList"></div>
             </section>
 
@@ -420,6 +428,25 @@
                         </div>
                     </div>
 
+                    <!-- 均衡器 (对齐上游 v0.4.36：6 频段 + 22 预设，Android 原生音频特效引擎) -->
+                    <div class="settings-group">
+                        <h3 class="settings-group-title">均衡器 (Equalizer)</h3>
+                        <div class="settings-row">
+                            <span class="settings-row-label">启用均衡器</span>
+                            <label class="sp-toggle">
+                                <input type="checkbox" id="toggleEq">
+                                <span class="sp-toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div id="eqControlsPanel" style="display:none; padding-top:8px;">
+                            <div class="settings-row">
+                                <span class="settings-row-label">音效预设</span>
+                                <select id="eqPresetSelect" class="sp-select"></select>
+                            </div>
+                            <div class="eq-bands-grid" id="eqBandsGrid"></div>
+                        </div>
+                    </div>
+
                     <div class="settings-group">
                         <h3 class="settings-group-title">存储空间</h3>
                         <div class="settings-row">
@@ -436,7 +463,7 @@
                         <div class="settings-row">
                             <div class="settings-col">
                                 <span class="settings-row-label">MySpotify Mobile</span>
-                                <p class="settings-row-desc">版本 v0.4.34 (桌面全功能 + Spotify 原版架构)</p>
+                                <p class="settings-row-desc">版本 v0.4.37 (同步桌面端全量更新 + 均衡器/音质/每日推荐修复)</p>
                             </div>
                             <a href="https://github.com/Ryougio/MySpotify" target="_blank" class="sp-link-green">GitHub</a>
                         </div>
@@ -530,7 +557,10 @@
 
                 <div class="np-track-meta-row">
                     <div class="np-titles">
-                        <h1 class="np-title-text" id="npTrackTitle">未在播放</h1>
+                        <div class="np-title-line">
+                            <h1 class="np-title-text" id="npTrackTitle">未在播放</h1>
+                            <span class="sp-quality-badge" id="npQualityBadge" style="display:none;">256k</span>
+                        </div>
                         <p class="np-artist-text" id="npTrackArtist">选择歌曲开始聆听</p>
                     </div>
                     <button class="np-heart-btn" id="npBtnLike" title="点赞">
@@ -592,6 +622,9 @@
                             <rect x="4" y="2" width="16" height="12" rx="2"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="8" y1="18" x2="16" y2="18"/>
                         </svg>
                         <span>当前设备</span>
+                    </button>
+                    <button class="np-footer-btn" id="npBtnSpeed" title="倍速播放">
+                        <span id="npSpeedLabel">1.0×</span>
                     </button>
                     <button class="np-footer-btn" id="npBtnShare">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">

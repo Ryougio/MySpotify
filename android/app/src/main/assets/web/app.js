@@ -37,6 +37,35 @@
     const CHARTS_FEATURE_SECTION = "spotify:section:0JQ5DAzQHECxDlYNI6xD1g";
     const CHARTS_DAILY_SECTION = "spotify:section:0JQ5DAzQHECxDlYNI6xD1i";
     const CHARTS_FIRST_ORDER = ["全球", "台湾", "香港", "日本", "韩国", "美国", "英国", "新加坡", "马来西亚"];
+    const FOR_YOU_SECTION = "spotify:section:0JQ5DAUnp4wcj0bCb3wh3S";
+    const MADE_FOR_YOU_PAGE = "spotify:page:0JQ5DAt0tbjZptfcdMSKl3";
+
+    // 上游 v0.4.36 同款 6 频段 + 22 官方预设
+    const EQ_BAND_LABELS = ["60 Hz", "150 Hz", "400 Hz", "1 kHz", "2.4 kHz", "15 kHz"];
+    const EQ_PRESETS = [
+        { name: "平坦", gains: [0, 0, 0, 0, 0, 0] },
+        { name: "原声", gains: [4, 3, 1, 0, 2, 1] },
+        { name: "低音增强", gains: [6, 5, 3, 0, 0, 0] },
+        { name: "低音减弱", gains: [-6, -5, -3, 0, 0, 0] },
+        { name: "高音增强", gains: [0, 0, 0, 2, 4, 6] },
+        { name: "人声增强", gains: [-2, -1, 2, 4, 3, 0] },
+        { name: "摇滚", gains: [5, 3, -1, -1, 3, 4] },
+        { name: "流行", gains: [-1, 2, 4, 3, 0, -1] },
+        { name: "古典", gains: [4, 3, 2, 0, 2, 3] },
+        { name: "舞曲", gains: [6, 4, 1, 0, 3, 2] },
+        { name: "深沉", gains: [5, 4, 2, 0, -2, -4] },
+        { name: "电子", gains: [5, 3, 0, -2, 3, 4] },
+        { name: "嘻哈", gains: [5, 4, 1, 2, -1, 2] },
+        { name: "爵士", gains: [3, 2, -2, 2, 3, 3] },
+        { name: "拉丁", gains: [3, 1, 0, 0, 2, 4] },
+        { name: "响度", gains: [6, 3, -1, -1, 2, 5] },
+        { name: "酒廊", gains: [-2, 0, 2, 3, 1, -1] },
+        { name: "钢琴", gains: [2, 1, 0, 2, 3, 3] },
+        { name: "节奏布鲁斯", gains: [5, 7, 2, -2, 3, 3] },
+        { name: "小扬声器", gains: [4, 3, 2, 0, -1, -2] },
+        { name: "语音", gains: [-4, -2, 2, 4, 3, 0] },
+        { name: "高音减弱", gains: [0, 0, 0, -2, -4, -6] }
+    ];
 
     const FALLBACK_COVER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Crect width='300' height='300' fill='%23282828'/%3E%3Ccircle cx='150' cy='150' r='55' fill='none' stroke='%23444' stroke-width='8'/%3E%3Ccircle cx='150' cy='150' r='14' fill='%231ed760'/%3E%3C/svg%3E";
 
@@ -52,7 +81,7 @@
 
         // 首页与发现状态
         homeFacet: "",
-        dailyMixUri: "",
+        dailyMixUri: localStorage.getItem("cached_daily_mix_uri") || "",
         browseCategories: [],
         chartsLoaded: false,
 
@@ -67,11 +96,12 @@
 
         // 当前详情页上下文
         currentDetailTracks: [],
+        filteredDetailTracks: null,
         currentDetailUri: "",
         currentDetailSaved: false,
         currentArtist: null,
 
-        // 播放器与队列状态
+        // 播放器、倍速与均衡器状态
         currentTrack: null,
         queue: [],
         queueIndex: -1,
@@ -82,6 +112,9 @@
         isDraggingScrub: false,
         shuffle: false,
         repeat: false,
+        playbackSpeed: 1.0,
+        eqEnabled: false,
+        eqGains: [0, 0, 0, 0, 0, 0],
         lyrics: [],
         activeLyricIdx: -1
     };
@@ -265,6 +298,22 @@
         seekAudio(posMs) {
             if (window.AndroidBridge && window.AndroidBridge.seekTo) {
                 window.AndroidBridge.seekTo(Math.max(0, Math.floor(posMs)));
+            }
+        },
+        setEqualizer(enabled, gains) {
+            if (window.AndroidBridge && window.AndroidBridge.setEqualizer) {
+                window.AndroidBridge.setEqualizer(Boolean(enabled), JSON.stringify(gains || [0, 0, 0, 0, 0, 0]));
+            }
+        },
+        getEqualizer() {
+            if (window.AndroidBridge && window.AndroidBridge.getEqualizer) {
+                try { return JSON.parse(window.AndroidBridge.getEqualizer()); } catch (e) {}
+            }
+            return { enabled: false, gains: [0, 0, 0, 0, 0, 0] };
+        },
+        setPlaybackSpeed(speed) {
+            if (window.AndroidBridge && window.AndroidBridge.setPlaybackSpeed) {
+                window.AndroidBridge.setPlaybackSpeed(Number(speed) || 1.0);
             }
         },
         getCacheSize(cb) {
@@ -609,7 +658,7 @@
                     shortcuts = parsedItems;
                     continue;
                 }
-                if (sec.uri === "spotify:section:0JQ5DAnM3wGh0gz1MXnu3B" && parsedItems[0] && !forYouUri) {
+                if (sec.uri === FOR_YOU_SECTION && parsedItems[0] && !forYouUri) {
                     forYouUri = parsedItems[0].uri;
                 }
                 if (typename === "HomeFeedBaselineSectionData") {
@@ -627,8 +676,24 @@
                 shelves.push({ title: title || "推荐精选", items: parsedItems });
             }
 
-            if (!state.dailyMixUri && forYouUri) {
-                state.dailyMixUri = forYouUri;
+            // 对齐上游 v0.4.35 & v0.4.37 (#42)：检查全部 sections 和 shortcuts，找不到则去「为你打造」分页查找
+            let foundDaily = "";
+            const allHomeItems = [];
+            shelves.forEach(s => allHomeItems.push(...s.items));
+            allHomeItems.push(...shortcuts);
+            for (const it of allHomeItems) {
+                if (it.uri && it.uri.startsWith("spotify:playlist:37i9dQZF1E3")) {
+                    foundDaily = it.uri;
+                    break;
+                }
+            }
+            if (!foundDaily && facet === "" && state.isLoggedIn) {
+                foundDaily = await findMadeForYouDaily();
+            }
+            if (!foundDaily && forYouUri) foundDaily = forYouUri;
+            if (foundDaily) {
+                state.dailyMixUri = foundDaily;
+                try { localStorage.setItem("cached_daily_mix_uri", foundDaily); } catch (e) {}
             }
 
             // 渲染顶部 2 列快捷网格
@@ -662,6 +727,62 @@
             `;
             document.getElementById("btnRetryHome")?.addEventListener("click", () => loadHomeFeed(state.homeFacet));
         }
+    }
+
+    // 上游 v0.4.35 & v0.4.37 (#42) 同款：当首页未放 Daily Mix 时，分页遍历「为你打造」页面查找
+    async function findMadeForYouDaily() {
+        try {
+            let pageOffset = 0;
+            while (pageOffset < 100) {
+                let nextPage = 0;
+                let sectionOffset = 0;
+                while (sectionOffset < 100) {
+                    const res = await gql("browsePage", {
+                        uri: MADE_FOR_YOU_PAGE,
+                        pagePagination: { offset: pageOffset, limit: 20 },
+                        sectionPagination: { offset: sectionOffset, limit: 20 },
+                        browseEndUserIntegration: "INTEGRATION_WEB_PLAYER"
+                    });
+                    const sections = res?.data?.browse?.sections;
+                    if (!sections || !sections.items) return "";
+
+                    if (sectionOffset === 0) {
+                        if (sections.pagingInfo && sections.pagingInfo.nextOffset != null) {
+                            nextPage = sections.pagingInfo.nextOffset;
+                        } else if (pageOffset + sections.items.length < (sections.totalCount || 0) && sections.items.length > 0) {
+                            nextPage = pageOffset + sections.items.length;
+                        }
+                    }
+
+                    let nextSection = 0;
+                    for (const s of sections.items) {
+                        const items = s?.sectionItems?.items || [];
+                        for (const it of items) {
+                            const ent = parseEntity(it?.content?.data);
+                            if (ent && ent.uri && ent.uri.startsWith("spotify:playlist:37i9dQZF1E3")) {
+                                return ent.uri;
+                            }
+                        }
+                        const si = s?.sectionItems;
+                        if (si) {
+                            let next = sectionOffset + items.length;
+                            if (si.pagingInfo && si.pagingInfo.nextOffset != null) next = si.pagingInfo.nextOffset;
+                            else if (next >= (si.totalCount || 0)) continue;
+                            if (next > sectionOffset && (nextSection === 0 || next < nextSection)) {
+                                nextSection = next;
+                            }
+                        }
+                    }
+                    if (nextSection <= sectionOffset) break;
+                    sectionOffset = nextSection;
+                }
+                if (nextPage <= pageOffset) break;
+                pageOffset = nextPage;
+            }
+        } catch (e) {
+            console.warn("findMadeForYouDaily error:", e);
+        }
+        return "";
     }
 
     function renderHomeShortcuts(gridEl, shortcuts) {
@@ -1767,6 +1888,21 @@
     }
 
     function renderTracksToElement(container, tracks, sourceName) {
+        // 如果渲染的是歌单详情页，按上游 v0.4.30 规范：超过 12 首自动展示歌单内筛选框
+        if (container && container.id === "playlistTracksList" && tracks === state.currentDetailTracks) {
+            const filterWrap = document.getElementById("playlistFilterWrap");
+            const filterIn = document.getElementById("playlistFilterInput");
+            if (filterWrap) {
+                const showFilter = tracks && tracks.length > 12;
+                filterWrap.style.display = showFilter ? "flex" : "none";
+                if (!showFilter && filterIn) filterIn.value = "";
+            }
+            if (filterIn && filterIn.value.trim()) {
+                applyPlaylistFilter(filterIn.value);
+                return;
+            }
+            state.filteredDetailTracks = null;
+        }
         container.innerHTML = "";
         if (!tracks || tracks.length === 0) {
             container.innerHTML = `<div class="sp-loading-box">暂无歌曲</div>`;
@@ -1888,14 +2024,22 @@
         loadTrackLyrics(track);
 
         // 解析可播放音频流
+        const qualityBadge = document.getElementById("npQualityBadge");
+        if (qualityBadge) {
+            qualityBadge.style.display = "inline-block";
+            qualityBadge.textContent = "HQ";
+        }
         try {
             const audioRes = await Native.resolveAudioUrl(track.title, track.artist);
             if (audioRes && audioRes.audioUrl) {
+                if (qualityBadge) qualityBadge.textContent = "256k";
                 Native.playAudio(audioRes.audioUrl, track.title, track.artist, track.cover || "");
             } else {
+                if (qualityBadge) qualityBadge.style.display = "none";
                 Native.toast("暂未匹配到可播放音源");
             }
         } catch (err) {
+            if (qualityBadge) qualityBadge.style.display = "none";
             Native.toast("音源解析失败：" + (err.message || ""));
         }
     }
@@ -2204,13 +2348,27 @@
         document.getElementById("libRowLiked").addEventListener("click", () => openLikedSongsDetail());
         document.getElementById("btnSyncLibrary").addEventListener("click", () => syncSpotifyData(true));
 
-        // 歌单详情页全部播放
+        // 歌单详情页全部播放（支持播放筛选后的结果，对齐上游 v0.4.30）
         document.getElementById("btnPlayAllInHero").addEventListener("click", () => {
-            if (state.currentDetailTracks.length > 0) {
+            const list = state.filteredDetailTracks || state.currentDetailTracks;
+            if (list && list.length > 0) {
                 const name = document.getElementById("playlistHeroName").textContent;
-                playTrack(state.currentDetailTracks[0], state.currentDetailTracks, 0, name);
+                playTrack(list[0], list, 0, name);
             }
         });
+
+        // 歌单内快速筛选输入与清空
+        const plFilterIn = document.getElementById("playlistFilterInput");
+        const plFilterClear = document.getElementById("btnClearPlaylistFilter");
+        if (plFilterIn) {
+            plFilterIn.addEventListener("input", (e) => applyPlaylistFilter(e.target.value));
+        }
+        if (plFilterClear) {
+            plFilterClear.addEventListener("click", () => {
+                if (plFilterIn) plFilterIn.value = "";
+                applyPlaylistFilter("");
+            });
+        }
 
         // 艺人主页按钮
         document.getElementById("btnArtistFollow").addEventListener("click", () => toggleArtistFollow());
@@ -2275,6 +2433,17 @@
             Native.toast(state.repeat ? "单曲循环" : "列表循环");
         });
 
+        // 倍速播放切换 (对齐上游 v0.4.28：0.5x ~ 2.0x)
+        const SPEEDS = [1.0, 1.25, 1.5, 2.0, 0.5, 0.75];
+        document.getElementById("npBtnSpeed")?.addEventListener("click", () => {
+            const idx = SPEEDS.indexOf(state.playbackSpeed);
+            state.playbackSpeed = SPEEDS[(idx + 1) % SPEEDS.length];
+            const label = document.getElementById("npSpeedLabel");
+            if (label) label.textContent = state.playbackSpeed.toFixed(state.playbackSpeed % 1 === 0 ? 1 : 2).replace(/0$/, "") + "×";
+            Native.setPlaybackSpeed(state.playbackSpeed);
+            Native.toast("播放倍速：" + state.playbackSpeed + "×");
+        });
+
         // 触控拖拽进度条
         setupDraggableScrubber();
 
@@ -2333,8 +2502,123 @@
         });
     }
 
+    function applyPlaylistFilter(rawQuery) {
+        const q = (rawQuery || "").trim().toLowerCase();
+        const clearBtn = document.getElementById("btnClearPlaylistFilter");
+        if (clearBtn) clearBtn.style.display = q ? "block" : "none";
+        const listEl = document.getElementById("playlistTracksList");
+        const sourceName = document.getElementById("playlistHeroName")?.textContent || "歌单";
+
+        if (!q) {
+            state.filteredDetailTracks = null;
+            renderTracksToElement(listEl, state.currentDetailTracks, sourceName);
+            return;
+        }
+        const words = q.split(/\s+/).filter(Boolean);
+        const matched = state.currentDetailTracks.filter(tr => {
+            const hay = `${tr.title || ""} ${tr.artist || ""} ${tr.album || ""}`.toLowerCase();
+            return words.every(w => hay.includes(w));
+        });
+        state.filteredDetailTracks = matched;
+        renderTracksToElement(listEl, matched, sourceName);
+    }
+
+    function setupEqualizerUI() {
+        const toggle = document.getElementById("toggleEq");
+        const panel = document.getElementById("eqControlsPanel");
+        const select = document.getElementById("eqPresetSelect");
+        const grid = document.getElementById("eqBandsGrid");
+        if (!toggle || !panel || !select || !grid) return;
+
+        // 从本地加载上次均衡器设置
+        const saved = Native.getEqualizer();
+        state.eqEnabled = Boolean(saved.enabled);
+        if (Array.isArray(saved.gains) && saved.gains.length === 6) {
+            state.eqGains = saved.gains.map(Number);
+        }
+
+        // 填充 22 个预设 + 自定义
+        select.innerHTML = "";
+        EQ_PRESETS.forEach((p, i) => {
+            const opt = document.createElement("option");
+            opt.value = String(i);
+            opt.textContent = p.name;
+            select.appendChild(opt);
+        });
+        const customOpt = document.createElement("option");
+        customOpt.value = "custom";
+        customOpt.textContent = "自定义";
+        select.appendChild(customOpt);
+
+        // 渲染 6 个频段滑块
+        grid.innerHTML = "";
+        const sliders = [];
+        const valLabels = [];
+        EQ_BAND_LABELS.forEach((label, idx) => {
+            const row = document.createElement("div");
+            row.className = "eq-band-row";
+            row.innerHTML = `
+                <span class="eq-band-freq">${label}</span>
+                <input type="range" class="eq-band-slider" min="-12" max="12" step="0.5" value="${state.eqGains[idx]}">
+                <span class="eq-band-val">${state.eqGains[idx] > 0 ? "+" : ""}${state.eqGains[idx]} dB</span>
+            `;
+            const sl = row.querySelector("input");
+            const vl = row.querySelector(".eq-band-val");
+            sl.addEventListener("input", () => {
+                const v = parseFloat(sl.value);
+                state.eqGains[idx] = v;
+                vl.textContent = (v > 0 ? "+" : "") + v + " dB";
+                syncPresetDropdown();
+                Native.setEqualizer(state.eqEnabled, state.eqGains);
+            });
+            sliders.push(sl);
+            valLabels.push(vl);
+            grid.appendChild(row);
+        });
+
+        const syncPresetDropdown = () => {
+            const matchIdx = EQ_PRESETS.findIndex(p =>
+                p.gains.every((g, i) => Math.abs(g - state.eqGains[i]) < 0.01)
+            );
+            select.value = matchIdx >= 0 ? String(matchIdx) : "custom";
+        };
+
+        const syncSliders = () => {
+            sliders.forEach((sl, i) => {
+                sl.value = state.eqGains[i];
+                valLabels[i].textContent = (state.eqGains[i] > 0 ? "+" : "") + state.eqGains[i] + " dB";
+            });
+        };
+
+        select.addEventListener("change", () => {
+            const idx = parseInt(select.value, 10);
+            if (!isNaN(idx) && EQ_PRESETS[idx]) {
+                state.eqGains = [...EQ_PRESETS[idx].gains];
+                syncSliders();
+                Native.setEqualizer(state.eqEnabled, state.eqGains);
+            }
+        });
+
+        toggle.checked = state.eqEnabled;
+        panel.style.display = state.eqEnabled ? "block" : "none";
+        syncPresetDropdown();
+
+        toggle.addEventListener("change", () => {
+            state.eqEnabled = toggle.checked;
+            panel.style.display = state.eqEnabled ? "block" : "none";
+            Native.setEqualizer(state.eqEnabled, state.eqGains);
+            Native.toast(state.eqEnabled ? "均衡器已开启" : "均衡器已关闭");
+        });
+
+        // 启动时同步均衡器给原生音频服务
+        if (state.eqEnabled) {
+            Native.setEqualizer(true, state.eqGains);
+        }
+    }
+
     function init() {
         bindEvents();
+        setupEqualizerUI();
         syncSpotifyData(false);
     }
 
