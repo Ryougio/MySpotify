@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -31,6 +32,27 @@ func TestSungLine(t *testing.T) {
 	}{{1 * s, -1}, {3 * s, 0}, {5500 * time.Millisecond, 0}, {9500 * time.Millisecond, 1}, {12 * s, -1}, {21 * s, 2}, {25 * s, -1}} {
 		if got := sungLine(lines, c.at); got != c.want {
 			t.Errorf("at %v: line %d, want %d", c.at, got, c.want)
+		}
+	}
+}
+
+// Through a break, and before the first line, the desktop lyrics show the
+// line coming, resting, and after the last line, the last: not the song's
+// name, which came and went with each break between lines.
+func TestDeskLineThroughBreaks(t *testing.T) {
+	s := time.Second
+	lines := []lyrics.Line{
+		{At: 2 * s, End: 5 * s, Text: "一"},
+		{At: 20 * s, End: 23 * s, Text: ""},
+		{At: 24 * s, End: 27 * s, Text: "三"},
+	}
+	for _, c := range []struct {
+		at      time.Duration
+		want    int
+		resting bool
+	}{{1 * s, 0, true}, {3 * s, 0, false}, {12 * s, 2, true}, {21 * s, 2, true}, {25 * s, 2, false}, {40 * s, 2, true}} {
+		if got, resting := deskLine(lines, c.at); got != c.want || resting != c.resting {
+			t.Errorf("at %v: line %d resting %v, want %d %v", c.at, got, resting, c.want, c.resting)
 		}
 	}
 }
@@ -171,7 +193,7 @@ func TestDeskFrameBudget(t *testing.T) {
 
 // With NM_FRAMES set, saves the desktop lyrics over a light and a dark
 // desktop: a line half sung, under the pointer, locked under it, and the
-// song's name between lines.
+// line coming, dimmed, through a break between lines.
 func TestDeskFrames(t *testing.T) {
 	dir := os.Getenv("NM_FRAMES")
 	if dir == "" {
@@ -225,4 +247,116 @@ func TestDeskFrames(t *testing.T) {
 	}
 	png.Encode(f, tt.Image())
 	f.Close()
+}
+
+// The words of an English line keep the spaces between them: each word its
+// own text to come and go, they ran together as Holdmecloser.
+func TestDeskWordsKeepTheirSpaces(t *testing.T) {
+	a, d, _ := deskApp(t)
+	lines, _ := a.pl.Lyrics()
+	l := &lines[1]
+	l.Text = "Hold me closer"
+	l.Words = lyrics.SpreadWords(l.Text, l.At, l.End)
+	a.pl.Seek(12500 * time.Millisecond)
+	tt := ui.NewTester(d.view, deskW, deskH)
+	tt.Frame()
+	tt.Advance(time.Second)
+	tt.Frame()
+	hold, ok1 := tt.Find("Hold ")
+	me, ok2 := tt.Find("me ")
+	if !ok1 || !ok2 {
+		t.Fatalf("no words in %q", tt.Texts())
+	}
+	if gap := me.X - (hold.X + hold.W); gap < 5 {
+		t.Errorf("%.1f between Hold and me", gap)
+	}
+}
+
+// A line sung starts to dissolve before the next comes, a word at a time
+// from the left and none before it is sung, the last half gone as the next
+// comes in a word at a time: it went all at once as the next came, a flash.
+func TestDeskFadeGoesWordByWord(t *testing.T) {
+	sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
+	f := deskFade{at: sec(10), change: sec(20), enters: true, n: 6}
+	f.pos = sec(19.1)
+	if _, first := f.word(0, sec(14)); first <= 0 {
+		t.Errorf("0.9 s before the next line, the first word not going: %v", first)
+	}
+	if _, last := f.word(5, sec(14)); last != 0 {
+		t.Errorf("the last word going as soon as the first: %v", last)
+	}
+	if _, unsung := f.word(0, sec(19.8)); unsung != 0 {
+		t.Errorf("a word going before it is sung: %v", unsung)
+	}
+	f.pos = sec(20)
+	if _, first := f.word(0, sec(14)); first != 1 {
+		t.Errorf("the first word not gone as the next line comes: %v", first)
+	}
+	if _, last := f.word(5, sec(14)); last <= 0 || last >= 1 {
+		t.Errorf("the last word not on its way as the next line comes: %v", last)
+	}
+	f.pos = sec(10.2)
+	first, _ := f.word(0, 0)
+	last, _ := f.word(5, 0)
+	if first <= 0 || first >= 1 || last >= first {
+		t.Errorf("coming in: first word %v, last %v", first, last)
+	}
+}
+
+// A line dissolves only as another takes its place: the last, sung, stays
+// dimmed to the end, where it dissolved and came back through the outro.
+func TestDeskLastLineStays(t *testing.T) {
+	a, _, _ := playingApp()
+	lines, _ := a.pl.Lyrics()
+	goes := func(cur int, pos time.Duration) time.Duration {
+		return deskGoes(lines, cur, pos, lyricChange(lines, cur, pos))
+	}
+	if at := goes(1, 12*time.Second); at != 16*time.Second {
+		t.Errorf("a line before a break dissolves at %v, not as the break begins", at)
+	}
+	if at := goes(len(lines)-1, lines[len(lines)-1].At+2*time.Second); at != 0 {
+		t.Errorf("the last line dissolves at %v", at)
+	}
+}
+
+// With NM_FRAMES set, saves a strip of the desktop lyrics, a frame every
+// 100 ms, as a line dissolves and the next comes in word by word: a Chinese
+// line after another, and an English one after it.
+func TestDeskChangeFrames(t *testing.T) {
+	dir := os.Getenv("NM_FRAMES")
+	if dir == "" {
+		t.Skip()
+	}
+	a, d, _ := deskApp(t)
+	d.hover = false
+	lines, _ := a.pl.Lyrics()
+	for i, text := range map[int]string{2: "车窗外萧瑟的风加速了寂寞", 3: "Hold me closer, tiny dancer"} {
+		l := &lines[i]
+		l.Text, l.End = text, lines[i+1].At
+		l.Words = lyrics.SpreadWords(text, l.At, l.At+5*time.Second)
+	}
+	lines[1].End = lines[2].At
+	for _, at := range []time.Duration{20 * time.Second, 30 * time.Second} {
+		const n = 27
+		img := image.NewRGBA(image.Rect(0, 0, deskW, deskH*n))
+		draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{28, 34, 48, 255}), image.Point{}, draw.Src)
+		a.pl.Seek(at - 3*time.Second)
+		tt := ui.NewTester(d.view, deskW, deskH)
+		tt.Frame()
+		tt.Advance(time.Second)
+		tt.Frame()
+		for f := range n {
+			pos := at - 1500*time.Millisecond + time.Duration(f)*100*time.Millisecond
+			a.pl.Seek(pos)
+			tt.Advance(100 * time.Millisecond)
+			tt.Frame()
+			draw.Draw(img, image.Rect(0, f*deskH, deskW, (f+1)*deskH), tt.Image(), image.Point{}, draw.Over)
+		}
+		f, err := os.Create(filepath.Join(dir, fmt.Sprintf("desk-change-%ds.png", at/time.Second)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		png.Encode(f, img)
+		f.Close()
+	}
 }

@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -464,6 +466,10 @@ func stripTags(s string) string {
 }
 
 type gqlSections struct {
+	TotalCount int `json:"totalCount"`
+	PagingInfo *struct {
+		NextOffset *int `json:"nextOffset"`
+	} `json:"pagingInfo"`
 	Items []struct {
 		URI  string `json:"uri"`
 		Data struct {
@@ -565,12 +571,100 @@ func appendNew(items, more []HomeItem) []HomeItem {
 // The home's section of playlists made for the listener.
 const forYouSection = "spotify:section:0JQ5DAUnp4wcj0bCb3wh3S"
 
+// madeForYouPage is the page of all the listener's mixes, as the web
+// player's Made For You: their Daily Mixes among them, every day.
+const madeForYouPage = "spotify:page:0JQ5DAt0tbjZptfcdMSKl3"
+
+// dailyMix reports whether id is a Daily Mix, 37i9dQZF1E3…; Discover Weekly
+// and radios aren't.
+func dailyMix(id string) bool { return strings.HasPrefix(id, "spotify:playlist:37i9dQZF1E3") }
+
+// madeForYouDaily returns the first of the listener's Daily Mixes on the
+// Made For You page, "" for none.
+func madeForYouDaily() (string, error) {
+	for pageOffset := 0; ; {
+		nextPage := 0
+		for sectionOffset := 0; ; {
+			var res struct {
+				Browse *struct {
+					Sections gqlSections `json:"sections"`
+				} `json:"browse"`
+			}
+			err := query("browsePage", map[string]any{
+				"uri":                      madeForYouPage,
+				"pagePagination":           map[string]int{"offset": pageOffset, "limit": 20},
+				"sectionPagination":        map[string]int{"offset": sectionOffset, "limit": 20},
+				"browseEndUserIntegration": "INTEGRATION_WEB_PLAYER",
+			}, &res)
+			if err != nil {
+				return "", err
+			}
+			if res.Browse == nil {
+				return "", fmt.Errorf("browsePage: missing Made For You page")
+			}
+			sections := res.Browse.Sections
+			if sectionOffset == 0 {
+				if sections.PagingInfo != nil {
+					if next := sections.PagingInfo.NextOffset; next != nil {
+						nextPage = *next
+					}
+				} else if next := pageOffset + len(sections.Items); next < sections.TotalCount && len(sections.Items) > 0 {
+					nextPage = next
+				}
+			}
+			nextSection := 0
+			var diagnostic []string
+			for _, s := range sections.Items {
+				types := map[string]int{}
+				var candidates []string
+				for _, it := range s.SectionItems.Items {
+					e := it.Content.Data
+					if pl, ok := e.playlist(); ok && dailyMix(pl.ID) {
+						return pl.ID, nil
+					}
+					types[e.Typename]++
+					if len(candidates) < 3 && e.URI != "" {
+						candidates = append(candidates, fmt.Sprintf("%q=%s", e.Name, e.URI))
+					}
+				}
+				diagnostic = append(diagnostic, fmt.Sprintf("%q items=%d/%d types=%v sample=[%s]", s.Data.Title.TransformedLabel,
+					len(s.SectionItems.Items), s.SectionItems.TotalCount, types, strings.Join(candidates, ", ")))
+				next := sectionOffset + len(s.SectionItems.Items)
+				if offset := s.SectionItems.PagingInfo.NextOffset; offset != nil {
+					next = *offset
+				} else if next >= s.SectionItems.TotalCount {
+					continue
+				}
+				if next > sectionOffset && (nextSection == 0 || next < nextSection) {
+					nextSection = next
+				}
+			}
+			log.Printf("spotify: made for you: no daily mix at page=%d items=%d sections=%d/%d: %s",
+				pageOffset, sectionOffset, len(sections.Items), sections.TotalCount, strings.Join(diagnostic, "; "))
+			if nextSection <= sectionOffset {
+				break
+			}
+			if nextSection >= homeSectionMax {
+				return "", fmt.Errorf("browsePage: Made For You items exceed %d", homeSectionMax)
+			}
+			sectionOffset = nextSection
+		}
+		if nextPage <= pageOffset {
+			return "", nil
+		}
+		if nextPage >= homeSectionMax {
+			return "", fmt.Errorf("browsePage: Made For You sections exceed %d", homeSectionMax)
+		}
+		pageOffset = nextPage
+	}
+}
+
 // feedTitle names the cards the feed gives one by one without a title.
 const feedTitle = "更多推荐"
 
 // HomeFeed returns the listener's home, as the web player shows it: all of
 // it, or with facet ("music-chip", "podcasts-chip"), its music or its
-// podcasts.
+// podcasts. A failed daily lookup returns the usable home with its error.
 func HomeFeed(facet string) (*Home, error) {
 	var res struct {
 		Home struct {
@@ -616,19 +710,32 @@ func HomeFeed(facet string) (*Home, error) {
 			forYou = items[0].List.ID
 		}
 	}
-	// Daily Mixes are 37i9dQZF1E3…; Discover Weekly and radios aren't.
+	// The feed may have a Daily Mix only in its grid of shortcuts, or, some
+	// days, nowhere: then the Made For You page has them all (#42).
+	var items []HomeItem
 	for _, s := range h.Sections {
-		for _, it := range s.Items {
-			if h.Daily == "" && it.List != nil && strings.HasPrefix(it.List.ID, "spotify:playlist:37i9dQZF1E3") {
-				h.Daily = it.List.ID
-			}
+		items = append(items, s.Items...)
+	}
+	for _, it := range append(items, h.Shortcuts...) {
+		if it.List != nil && dailyMix(it.List.ID) {
+			h.Daily = it.List.ID
+			break
+		}
+	}
+	var dailyErr error
+	if h.Daily == "" && facet == "" {
+		if h.Daily, dailyErr = madeForYouDaily(); dailyErr != nil {
+			log.Printf("spotify: made for you: %v", dailyErr)
 		}
 	}
 	h.Daily = cmp.Or(h.Daily, forYou)
+	if h.Daily != "" {
+		dailyErr = nil
+	}
 	if len(h.Shortcuts) == 0 {
 		h.Shortcuts = recent
 	}
-	return h, nil
+	return h, dailyErr
 }
 
 // addFeed adds items, which the feed gave one by one, to the section titled

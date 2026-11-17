@@ -100,6 +100,35 @@ func TestHomeFeedKeepsSpotifysSections(t *testing.T) {
 	}
 }
 
+// A Daily Mix only in the grid of shortcuts is still the day's songs: with
+// none in the sections, the daily page said 暂时没有推荐.
+func TestHomeFeedFindsTheDailyMixInTheShortcuts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"data":{"home":{"sectionContainer":{"sections":{"items":[
+{"uri":"spotify:section:shorts","data":{"__typename":"HomeShortsSectionData"},
+ "sectionItems":{"items":[{"content":{"data":{"__typename":"Playlist","uri":"spotify:playlist:37i9dQZF1E35mix","name":"每日推荐 2"}}}]}},
+{"uri":"spotify:section:radio","data":{"__typename":"HomeGenericSectionData","title":{"transformedLabel":"推荐电台"}},
+ "sectionItems":{"items":[{"content":{"data":{"__typename":"Playlist","uri":"spotify:playlist:37i9dQZF1E4radio","name":"电台"}}}]}}
+]}}}}}`)
+	}))
+	defer srv.Close()
+	pf := pathfinderURL
+	pathfinderURL = srv.URL
+	SetIdentity(Identity{Token: "t", Expires: time.Now().Add(time.Hour)})
+	defer func() {
+		pathfinderURL = pf
+		SetIdentity(Identity{})
+	}()
+
+	h, err := HomeFeed("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Daily != "spotify:playlist:37i9dQZF1E35mix" {
+		t.Errorf("daily = %q", h.Daily)
+	}
+}
+
 // Decorate names only the tracks without names, keeping their places in the
 // queue, and does not take them for unplayable for want of a playability.
 func TestDecorateNamesWhatIsOnlyAURI(t *testing.T) {
@@ -179,5 +208,160 @@ func TestLikedSongsKeepTheirNameFromSpotify(t *testing.T) {
 	pl, ok := e.playlist()
 	if !ok || !pl.Liked() || pl.Name != likedName || pl.Cover() != "" || pl.TrackCount != 12 {
 		t.Errorf("liked songs = %+v, %v", pl, ok)
+	}
+}
+
+// A home with no Daily Mix anywhere, as some days, takes the first of the
+// Made For You page's: the daily page said 暂时没有推荐 (#42). A chip's home
+// asks for none.
+func TestHomeFeedFindsTheDailyMixMadeForYou(t *testing.T) {
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var q struct {
+			Op        string         `json:"operationName"`
+			Variables map[string]any `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&q)
+		asked = append(asked, q.Op)
+		if q.Op == "browsePage" {
+			if q.Variables["uri"] != madeForYouPage {
+				t.Errorf("browsed %v", q.Variables["uri"])
+			}
+			fmt.Fprint(w, `{"data":{"browse":{"sections":{"items":[
+{"uri":"spotify:section:personal","sectionItems":{"items":[{"content":{"data":{"__typename":"Playlist","uri":"spotify:playlist:37i9dQZF1EP6daylist","name":"daylist"}}}]}},
+{"uri":"spotify:section:daily","sectionItems":{"items":[{"content":{"data":{"__typename":"Playlist","uri":"spotify:playlist:37i9dQZF1E36mix","name":"每日推荐 1"}}}]}}
+]}}}}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"home":{"sectionContainer":{"sections":{"items":[
+{"uri":"spotify:section:radio","data":{"__typename":"HomeGenericSectionData","title":{"transformedLabel":"推荐电台"}},
+ "sectionItems":{"items":[{"content":{"data":{"__typename":"Playlist","uri":"spotify:playlist:37i9dQZF1E4radio","name":"电台"}}}]}}
+]}}}}}`)
+	}))
+	defer srv.Close()
+	pf := pathfinderURL
+	pathfinderURL = srv.URL
+	SetIdentity(Identity{Token: "t", Expires: time.Now().Add(time.Hour)})
+	defer func() {
+		pathfinderURL = pf
+		SetIdentity(Identity{})
+	}()
+
+	h, err := HomeFeed("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Daily != "spotify:playlist:37i9dQZF1E36mix" {
+		t.Errorf("daily = %q", h.Daily)
+	}
+	asked = nil
+	if _, err := HomeFeed("music-chip"); err != nil || fmt.Sprint(asked) != "[home]" {
+		t.Errorf("a chip's home asked %v, %v", asked, err)
+	}
+}
+
+// A failed daily lookup keeps the usable home and reports failure, rather than clearing the cached songs (#42).
+func TestHomeFeedReportsDailyFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, browse string
+		failed       bool
+	}{
+		{"null with error", `{"data":{"browse":null},"errors":[{"message":"unavailable"}]}`, true},
+		{"missing page", `{"data":{"browse":null}}`, true},
+		{"no mixes", `{"data":{"browse":{"sections":{"items":[]}}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var q struct {
+					Op string `json:"operationName"`
+				}
+				json.NewDecoder(r.Body).Decode(&q)
+				if q.Op == "browsePage" {
+					fmt.Fprint(w, tc.browse)
+				} else {
+					fmt.Fprint(w, `{"data":{"home":{"greeting":{"transformedLabel":"hello"},"sectionContainer":{"sections":{"items":[]}}}}}`)
+				}
+			}))
+			defer srv.Close()
+			pf := pathfinderURL
+			pathfinderURL = srv.URL
+			SetIdentity(Identity{Token: "t", Expires: time.Now().Add(time.Hour)})
+			defer func() { pathfinderURL = pf; SetIdentity(Identity{}) }()
+			h, err := HomeFeed("")
+			if (err != nil) != tc.failed || h == nil || h.Greeting != "hello" || h.Daily != "" {
+				t.Fatalf("home = %+v, error = %v, want failed=%v and usable home", h, err, tc.failed)
+			}
+		})
+	}
+}
+
+// Daily Mixes beyond the first page are found, while an explicit last page and broken pagination stop (#42).
+func TestMadeForYouDailyFollowsPagination(t *testing.T) {
+	mix := `{"content":{"data":{"__typename":"Playlist","uri":"spotify:playlist:37i9dQZF1E3later","name":"Daily Mix 1"}}}`
+	for _, tc := range []struct {
+		name               string
+		wantMix, wantError bool
+	}{
+		{"sections", true, false}, {"items", true, false}, {"short item page", true, false}, {"last page", false, false}, {"limit", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var offsets [][2]int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var q struct {
+					Variables struct {
+						Page struct {
+							Offset int `json:"offset"`
+						} `json:"pagePagination"`
+						Section struct {
+							Offset int `json:"offset"`
+						} `json:"sectionPagination"`
+					} `json:"variables"`
+				}
+				json.NewDecoder(r.Body).Decode(&q)
+				p, s := q.Variables.Page.Offset, q.Variables.Section.Offset
+				offsets = append(offsets, [2]int{p, s})
+				if p == 20 || s == 20 || s == 5 {
+					fmt.Fprintf(w, `{"data":{"browse":{"sections":{"pagingInfo":{"nextOffset":null},"items":[{"sectionItems":{"items":[%s]}}]}}}}`, mix)
+					return
+				}
+				switch tc.name {
+				case "sections":
+					fmt.Fprint(w, `{"data":{"browse":{"sections":{"totalCount":21,"pagingInfo":{"nextOffset":20},"items":[{"sectionItems":{"items":[]}}]}}}}`)
+				case "items":
+					fmt.Fprint(w, `{"data":{"browse":{"sections":{"pagingInfo":{"nextOffset":null},"items":[{"sectionItems":{"totalCount":21,"pagingInfo":{"nextOffset":20},"items":[{}]}}]}}}}`)
+				case "short item page":
+					fmt.Fprint(w, `{"data":{"browse":{"sections":{"items":[{"sectionItems":{"pagingInfo":{"nextOffset":20},"items":[{}]}},{"sectionItems":{"pagingInfo":{"nextOffset":5},"items":[{}]}}]}}}}`)
+				case "limit":
+					fmt.Fprint(w, `{"data":{"browse":{"sections":{"pagingInfo":{"nextOffset":100},"items":[]}}}}`)
+				default:
+					fmt.Fprint(w, `{"data":{"browse":{"sections":{"totalCount":11,"pagingInfo":{"nextOffset":null},"items":[{"sectionItems":{"items":[]}}]}}}}`)
+				}
+			}))
+			defer srv.Close()
+			pf := pathfinderURL
+			pathfinderURL = srv.URL
+			SetIdentity(Identity{Token: "t", Expires: time.Now().Add(time.Hour)})
+			defer func() { pathfinderURL = pf; SetIdentity(Identity{}) }()
+			daily, err := madeForYouDaily()
+			if (err != nil) != tc.wantError || (daily != "") != tc.wantMix {
+				t.Fatalf("daily=%q err=%v offsets=%v", daily, err, offsets)
+			}
+			if tc.wantMix && daily != "spotify:playlist:37i9dQZF1E3later" {
+				t.Fatalf("wrong mix: %s", daily)
+			}
+			want := [][2]int{{0, 0}}
+			if tc.name == "sections" {
+				want = append(want, [2]int{20, 0})
+			}
+			if tc.name == "items" {
+				want = append(want, [2]int{0, 20})
+			}
+			if tc.name == "short item page" {
+				want = append(want, [2]int{0, 5})
+			}
+			if fmt.Sprint(offsets) != fmt.Sprint(want) {
+				t.Fatalf("offsets=%v want=%v", offsets, want)
+			}
+		})
 	}
 }

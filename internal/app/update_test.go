@@ -31,7 +31,7 @@ func updateApp(found *release, fail error) (*app, *int) {
 
 func settingsTester(a *app) *ui.Tester {
 	a.open(route{page: pageSettings})
-	tt := ui.NewTester(a.view, 1200, 2000)
+	tt := ui.NewTester(a.view, 1200, 2600)
 	tt.Frame()
 	return tt
 }
@@ -80,6 +80,36 @@ func TestUpdateInstalls(t *testing.T) {
 	}
 	if a.upd.stage != updateReady || *relaunched != 1 {
 		t.Fatalf("stage %v, relaunched %d times", a.upd.stage, *relaunched)
+	}
+}
+
+// 更新并重启 installs the latest version out, not an older one an earlier
+// check found: installing that one left another update to do after it.
+func TestUpdateInstallsTheLatest(t *testing.T) {
+	var installed []string
+	rel := func(v string) *release {
+		r := &release{Version: v}
+		r.install = func(context.Context, func(int64, int64)) error { installed = append(installed, v); return nil }
+		return r
+	}
+	a, _ := updateApp(rel("9.9.0"), nil)
+	a.checkUpdate(false)
+	a.upd.check = func(context.Context) (*release, error) { return rel("9.9.1"), nil }
+	tt := settingsTester(a)
+	click(t, tt, "更新并重启")
+	if !reflect.DeepEqual(installed, []string{"9.9.1"}) || a.upd.found.Version != "9.9.1" {
+		t.Fatalf("installed %v, found %s", installed, a.upd.found.Version)
+	}
+
+	// Asking again fails: what was found is installed still.
+	installed = nil
+	a, _ = updateApp(rel("9.9.0"), nil)
+	a.checkUpdate(false)
+	a.upd.check = func(context.Context) (*release, error) { return nil, errors.New("offline") }
+	tt = settingsTester(a)
+	click(t, tt, "更新并重启")
+	if !reflect.DeepEqual(installed, []string{"9.9.0"}) {
+		t.Fatalf("installed %v", installed)
 	}
 }
 

@@ -3,6 +3,7 @@ package app
 import (
 	"runtime"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -59,6 +60,7 @@ func newDesk(a *app) *desk {
 		Height:   deskH,
 		Content:  ui.View(d.view),
 	})
+	undecorate(d.win.NativeHandle())
 	// Escape and the like close a panel: this one hides with its setting.
 	d.win.OnClose(func(e *mygo.CloseEvent) {
 		if !a.quitting {
@@ -177,8 +179,9 @@ func (d *desk) view(c *ui.Context) {
 				d.tools(c, pane)
 			}
 			if key > 0.01 && pane <= 0.01 {
-				// On a dark disc, to be found on a light desktop too.
-				if iconButton(c.Key("unlock"), iconUnlock, 16, white, l10n.T("解锁桌面歌词")).Background(ui.RGBA(18, 18, 20, 0.6)).Opacity(key).Clicked() {
+				// On a dark disc, to be found on a light desktop too. The
+				// lock shows how they are: closed, locked.
+				if iconButton(c.Key("unlock"), iconLock, 16, white, l10n.T("解锁桌面歌词")).Background(ui.RGBA(18, 18, 20, 0.6)).Opacity(key).Clicked() {
 					a.setDeskLocked(false)
 				}
 			}
@@ -204,7 +207,7 @@ func (d *desk) tools(c *ui.Context, shown float32) {
 			pl.Next()
 		}
 		ui.Box(c).Size(1, 16).Margin(0, 8).Background(white.Alpha(0.25))
-		if iconButton(c.Key("lock"), iconLock, 16, white, l10n.T("锁定桌面歌词")).Clicked() {
+		if iconButton(c.Key("lock"), iconUnlock, 16, white, l10n.T("锁定桌面歌词")).Clicked() {
 			a.setDeskLocked(true)
 		}
 		if iconButton(c.Key("close"), iconX, 16, white, l10n.T("关闭桌面歌词")).Clicked() {
@@ -213,9 +216,11 @@ func (d *desk) tools(c *ui.Context, shown float32) {
 	})
 }
 
-// lyrics shows the line sung and the one under it, the line rising in as
-// it begins; else the song's name and artists, or nothing playing, the
-// app's name.
+// lyrics shows the line sung and the one under it, or dimmed, the line
+// coming through a break or the last after it; without timed lyrics the
+// song's name and artists, or nothing playing, the app's name. A line sung
+// comes in word by word out of a blur, and as its time runs out dissolves
+// word by word, the next coming in where it was (deskFade).
 func (d *desk) lyrics(c *ui.Context) {
 	a := d.a
 	pl := a.pl
@@ -223,13 +228,23 @@ func (d *desk) lyrics(c *ui.Context) {
 	lines, _ := pl.Lyrics()
 	pos := pl.SongPosition()
 	playing := pl.Playing()
-	cur := -1
+	cur, resting := -1, false
+	fade := deskFade{pos: pos}
 	if tr != nil && timed(lines) {
-		cur = sungLine(lines, pos)
+		cur, resting = deskLine(lines, pos)
 		if playing {
 			if wait := lyricChange(lines, lyrics.Index(lines, pos), pos); wait > 0 {
 				c.After(time.Duration(float64(wait)/pl.Rate()) + 20*time.Millisecond)
+				if cur >= 0 && !resting {
+					fade.change = deskGoes(lines, cur, pos, wait)
+				}
 			}
+		}
+		// A line comes in as it follows another; one shown dimmed through the
+		// break before it only brightens.
+		if cur >= 0 && !resting {
+			fade.at = lines[cur].At
+			fade.enters = sungLine(lines, lines[cur].At-time.Millisecond) >= 0
 		}
 	}
 	text, under, size := appName, "", float32(26)
@@ -239,48 +254,182 @@ func (d *desk) lyrics(c *ui.Context) {
 	case tr != nil:
 		text, under = tr.Name, tr.ArtistNames()
 	}
-	rise := float32(1)
-	if cur >= 0 && playing {
-		if rise = clamp01(float32((pos - lines[cur].At).Seconds() / 0.3)); rise < 1 {
-			c.AnimationFrame()
-		}
-	}
-	rise = easeOutCubic(rise)
 	w, _ := c.Size()
 	scale := a.settings.deskScale()
 	size = fitFont(c, text, size*scale, 800, w-64)
 	underSize := fitFont(c, under, 18*scale, 600, w-64)
 
-	ui.Column(c.Key(cur)).Absolute().Top(deskTop+deskTool).Left(32).Right(32).Bottom(12).Center().Gap(6).
-		Opacity(rise).Translate(0, (1-rise)*10).PassThrough().Children(func() {
-		if cur >= 0 && len(lines[cur].Words) > 0 {
-			d.words(c, &lines[cur], pos, size, playing)
-		} else {
-			deskShadow(ui.Text(c.Key("line"), text).FontSize(size).FontWeight(800).TextColor(white).SingleLine().PassThrough())
-		}
+	// The words of a line and the line under it go as their keys do: the
+	// line shown dimmed through the break before it only brightens.
+	col := ui.Column(c.Key("lyrics")).Absolute().Top(deskTop + deskTool).Left(32).Right(32).Bottom(12).Center().Gap(6)
+	lit := col.AnimateTo("lit", 1-0.45*b2f(resting), ui.Animation{Duration: 300 * time.Millisecond})
+	col.Opacity(lit).PassThrough().Children(func() {
+		// As wide as the window, the words going stay where they were, the
+		// line coming centered over them.
+		ui.Row(c.Key("line")).FillWidth().Justify(ui.Center).PassThrough().Children(func() {
+			words, color := lyrics.SpreadWords(text, 0, 0), func(int) ui.Color { return white }
+			if cur >= 0 && len(lines[cur].Words) > 0 {
+				words, color = lines[cur].Words, d.wordColors(c, &lines[cur], pos, playing)
+			}
+			// The space after a word, which its text alone loses at its end.
+			aa, _ := c.MeasureText(0, ui.Span{Text: "aa", Size: size, Weight: 800})
+			asa, _ := c.MeasureText(0, ui.Span{Text: "a a", Size: size, Weight: 800})
+			fade.n = len(words)
+			for i, wd := range words {
+				e := deskShadow(ui.Text(c.Key(deskBit{cur, text, i}), wd.Text).FontSize(size).FontWeight(800).TextColor(color(i)).SingleLine().PassThrough())
+				if strings.HasSuffix(wd.Text, " ") {
+					e.Margin(0, asa-aa, 0, 0)
+				}
+				fade.style(e, i, wd.End)
+			}
+		})
 		if under != "" {
-			deskShadow(ui.Text(c.Key("under"), under).FontSize(underSize).FontWeight(600).TextColor(white.Alpha(0.78)).SingleLine().PassThrough())
+			e := deskShadow(ui.Text(c.Key(deskBit{cur, under, -1}), under).FontSize(underSize).FontWeight(600).TextColor(white.Alpha(0.78)).SingleLine().PassThrough())
+			fade.style(e, fade.n/2, 0)
 		}
+	})
+	if playing {
+		fade.frames(c)
+	}
+}
+
+// deskGoes returns when line cur, sung at pos, dissolves, the lyrics
+// changing in wait: as another line takes its place. 0 when it stays, as
+// the last line does to the end, dimmed: it dissolved, and came back.
+func deskGoes(lines []lyrics.Line, cur int, pos, wait time.Duration) time.Duration {
+	if next, _ := deskLine(lines, pos+wait+20*time.Millisecond); next == cur {
+		return 0
+	}
+	return pos + wait
+}
+
+// deskFade is where the words of the line shown are in coming in and going,
+// at pos: a line sung from at, going at change (0 for one that stays), of
+// n words.
+type deskFade struct {
+	pos, at, change time.Duration
+	enters          bool
+	n               int
+}
+
+// The words come in one after another over at most deskInSpan, each over
+// deskInTime; as the line's time runs out they go one after another over
+// deskOutSpan, each over deskOutTime, starting deskOutFrom before the next
+// line: the last half gone as it comes in over it, with no empty moment.
+const (
+	deskInSpan, deskInTime   = 700 * time.Millisecond, 800 * time.Millisecond
+	deskOutSpan, deskOutTime = 600 * time.Millisecond, 800 * time.Millisecond
+	deskOutFrom              = deskOutSpan + deskOutTime - 400*time.Millisecond
+)
+
+// word returns how far the i-th word, sung by sung, has come in and gone,
+// each 0 to 1.
+func (f deskFade) word(i int, sung time.Duration) (in, out float32) {
+	in = 1
+	if f.enters {
+		step := min(70*time.Millisecond, deskInSpan/time.Duration(max(f.n, 1)))
+		in = clamp01(float32((f.pos - f.at - time.Duration(i)*step).Seconds() / deskInTime.Seconds()))
+	}
+	if f.change > 0 {
+		step := deskOutSpan / time.Duration(max(f.n-1, 1))
+		// Never before it is sung: the rest go with the line, as it goes.
+		from := max(f.change-deskOutFrom+time.Duration(i)*step, sung)
+		out = clamp01(float32((f.pos - from).Seconds() / deskOutTime.Seconds()))
+	}
+	return in, out
+}
+
+// style sets the i-th word, e, sung by sung, where it is in coming and
+// going: up into focus out of a blur, and up and apart into one, as smoke.
+// What is left of it as the line changes goes with its Exit.
+func (f deskFade) style(e ui.Element, i int, sung time.Duration) {
+	spread := (float32(i)+0.5)/float32(max(f.n, 1)) - 0.5 // -0.5 at the left, 0.5 at the right
+	in, out := f.word(i, sung)
+	in, out = deskIn(in), deskOut(out)
+	if in < 1 || out > 0 {
+		s := 0.9 + 0.1*in + 0.14*out
+		e.Opacity(in*(1-out)).Blur(12*(1-in)+14*out).Translate(spread*30*out, 18*(1-in)-22*out).Scale(s, s)
+	}
+	var enter *ui.Motion
+	if !f.enters { // a title, or a line dimmed before it is sung, fades in
+		enter = &ui.Motion{Blur: 8}
+	}
+	e.Transition(ui.ElementTransition{
+		Position:     true, // not the words' colors, which change as they are sung
+		Duration:     450 * time.Millisecond,
+		Ease:         deskOut,
+		Enter:        enter,
+		Exit:         &ui.Motion{X: spread * 30, Y: -22, Scale: 1.14, Blur: 14},
+		ExitDuration: 450 * time.Millisecond,
 	})
 }
 
-// words shows line l with its words sung by pos in the color chosen.
-func (d *desk) words(c *ui.Context, l *lyrics.Line, pos time.Duration, size float32, playing bool) {
+// frames asks for frames at the display's rate as the line comes in or
+// goes, and none in between.
+func (f deskFade) frames(c *ui.Context) {
+	if f.enters && f.pos < f.at+deskInSpan+deskInTime {
+		c.AnimationFrame()
+	}
+	if f.change > 0 {
+		if from := f.change - deskOutFrom; f.pos >= from {
+			c.AnimationFrame()
+		} else {
+			c.After(from - f.pos)
+		}
+	}
+}
+
+// deskBit is what a word of the desktop lyrics is, or with i -1 the line
+// under them: one that changes comes in, and the one before goes.
+type deskBit struct {
+	line int
+	text string
+	i    int
+}
+
+// deskIn comes quickly and settles slowly; deskOut starts gently, as a
+// word beginning to blow away, and drifts off. Curves, not springs: a
+// spring's tail kept asking for frames past a second, over every app.
+var deskIn, deskOut = ui.CubicBezier(0.22, 1, 0.36, 1), ui.CubicBezier(0.45, 0, 0.35, 1)
+
+// deskLine returns the line of timed lines to show at pos: the line sung,
+// or resting, the line coming, through a break or before the first, or
+// after the last, that line. -1 when no line has words.
+func deskLine(lines []lyrics.Line, pos time.Duration) (cur int, resting bool) {
+	if cur := sungLine(lines, pos); cur >= 0 {
+		return cur, false
+	}
+	i := lyrics.Index(lines, pos)
+	for j := i + 1; j < len(lines); j++ {
+		if lines[j].Text != "" {
+			return j, true
+		}
+	}
+	for j := min(i, len(lines)-1); j >= 0; j-- {
+		if lines[j].Text != "" {
+			return j, true
+		}
+	}
+	return -1, false
+}
+
+// wordColors returns the colors of line l's words, sung by pos in the
+// color chosen.
+func (d *desk) wordColors(c *ui.Context, l *lyrics.Line, pos time.Duration, playing bool) func(int) ui.Color {
 	tint := d.tint()
 	// White words sung stand out from those to come only as these dim.
 	ahead := white
 	if tint == white {
 		ahead = white.Alpha(0.5)
 	}
-	ui.RichText(c.Key("words")).FontSize(size).FontWeight(800).SingleLine().PassThrough().Children(func() {
-		for i, wd := range l.Words {
-			lit := clamp01(float32((pos - wd.Start).Seconds() / max(0.05, (wd.End-wd.Start).Seconds())))
-			deskShadow(ui.Text(c.Key(i), wd.Text).TextColor(ahead.Mix(tint, lit)))
-		}
-	})
 	// Words light up smoothly enough at 25 frames a second; sung, they rest.
+	// Shown ahead through a break, they wait for the first.
 	if playing && pos < l.Words[len(l.Words)-1].End {
-		c.After(40 * time.Millisecond)
+		c.After(max(40*time.Millisecond, l.Words[0].Start-pos))
+	}
+	return func(i int) ui.Color {
+		wd := l.Words[i]
+		return ahead.Mix(tint, clamp01(float32((pos-wd.Start).Seconds()/max(0.05, (wd.End-wd.Start).Seconds()))))
 	}
 }
 

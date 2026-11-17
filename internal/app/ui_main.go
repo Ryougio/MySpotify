@@ -465,7 +465,7 @@ func (a *app) centered(c *ui.Context, err string, retry func()) {
 // with nothing to load it again, and its page would stay on the skeleton.
 func (a *app) loadHome() {
 	gen := a.languageGen
-	a.homeLoading, a.homeErr = true, ""
+	a.homeLoading, a.homeErr, a.dailyErr = true, "", ""
 	go func() {
 		var (
 			wg     sync.WaitGroup
@@ -484,8 +484,11 @@ func (a *app) loadHome() {
 			if pl, err := spotify.PlaylistDetail(home.Daily); err == nil {
 				daily = pl.Tracks
 			} else {
+				log.Printf("home: daily %s: %v", home.Daily, err)
 				dailyOK = false
 			}
+		} else if dailyOK {
+			log.Printf("home: no daily mix")
 		}
 		wg.Wait()
 		a.post(func() {
@@ -505,6 +508,8 @@ func (a *app) loadHome() {
 			}
 			if dailyOK {
 				a.daily = daily
+			} else {
+				a.dailyErr = l10n.T("加载失败，请稍后再试")
 			}
 			if err1 != nil && err2 != nil {
 				log.Printf("home: %v; charts: %v", err1, err2)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"math"
 	"strconv"
 	"time"
@@ -246,12 +247,20 @@ func (a *app) nativeVolumeSlider(c *ui.Context, pop popover) {
 	})
 }
 
-// scrollVolume turns the volume up as the wheel or the fingers scroll up.
+// scrollVolume turns the volume up as the wheel or the fingers scroll up:
+// the fingers by how far they go, a wheel by 5% a notch. A notch is as far
+// as the system scrolls a page for it, on Windows 33 a line of its "lines
+// to scroll", which at 9 turned the volume 74% a notch (#42).
 func (a *app) scrollVolume(ev ui.InputEvent) bool {
 	if ev.Kind != ui.InputScroll {
 		return false
 	}
-	a.setVolume(min(1, max(0, a.volume-float64(ev.DY)/400)))
+	v := a.volume - float64(ev.DY)/400
+	if !ev.Precise {
+		// To the percent shown, so that turning down comes to 0, silent.
+		v = math.Round((a.volume-0.05*float64(cmp.Compare(ev.DY, 0)))*100) / 100
+	}
+	a.setVolume(min(1, max(0, v)))
 	return true
 }
 
@@ -402,6 +411,20 @@ func (a *app) playerBar(c *ui.Context) {
 	// narrower, the middle gives up to 140 DIPs, and what plays keeps room
 	// for its cover, some of its title and its heart.
 	const controls = 4*32 + 3*4 // lyrics, desktop lyrics, queue and the speaker
+	// Before them, where the window has room beyond what the rest keeps, the
+	// music video's button, then the badge of the bitrate ("256k", about
+	// 40): in a narrow window they pushed the speaker out of it.
+	w, _ := c.Size()
+	room := w - sidebarWidth - 1 - 2*20 - 2*20 - 150 - 300 - controls
+	side := float32(controls)
+	mv := tr != nil && pl.HasVideo() && room >= 32+4
+	if mv {
+		side += 32 + 4
+	}
+	badge := tr != nil && pl.Bitrate() > 0 && room-(side-controls) >= 44+4
+	if badge {
+		side += 44 + 4
+	}
 	ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(playerBarHeight).PaddingX(20).Gap(20).AlignItems(ui.Center).Children(func() {
 		// What plays.
 		ui.Row(c).Grow(1).Basis(0).MinWidth(150).Children(func() {
@@ -455,8 +478,11 @@ func (a *app) playerBar(c *ui.Context) {
 		})
 
 		// Lyrics and volume.
-		ui.Row(c).Grow(1).Basis(0).MinWidth(controls).Justify(ui.End).AlignItems(ui.Center).Gap(4).Children(func() {
-			if tr != nil && pl.HasVideo() {
+		ui.Row(c).Grow(1).Basis(0).MinWidth(side).Justify(ui.End).AlignItems(ui.Center).Gap(4).Children(func() {
+			if badge {
+				a.qualityBadge(c, p.press, p.faint)
+			}
+			if mv {
 				a.barMVButton(c)
 			}
 			lyr := p.muted

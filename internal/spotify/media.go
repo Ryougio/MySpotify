@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/url"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,7 +45,12 @@ type mediaEntry struct {
 	Item struct {
 		TrackType string `json:"track_type"` // AUDIO, VIDEO or MIXED
 		Metadata  struct {
-			Duration int64 `json:"duration"`
+			Duration int64  `json:"duration"`
+			Name     string `json:"name"`
+			Show     string `json:"group_name"` // an episode's podcast
+			Authors  []struct {
+				Name string `json:"name"`
+			} `json:"authors"`
 		} `json:"metadata"`
 		Manifest map[string][]mediaFile `json:"manifest"`
 	} `json:"item"`
@@ -82,9 +88,36 @@ func (n *looseInt) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// ResolveMedia returns the manifest of the lowest bitrate of uri, a
-// track's or a podcast episode's: 128k, which a free account is licensed to
-// play; the licence of the 256k one it is refused (403).
+// highQuality has ResolveMedia take the highest bitrate offered, 256k, whose
+// licence Premium accounts get; a free account is refused it (403). denied
+// holds the URIs it was refused for, which play at the lowest bitrate again.
+var (
+	highQuality atomic.Bool
+	denied      sync.Map
+)
+
+// SetHighQuality chooses the highest bitrate where the account is licensed
+// to play it, rather than always the lowest.
+func SetHighQuality(on bool) { highQuality.Store(on) }
+
+// Downgrade is called as the licence of a track playing at bitrate was
+// refused. It reports whether the track can be asked for again at the lowest
+// bitrate, which it then is; not if it played at that already.
+func Downgrade(uri string, bitrate int) bool {
+	if !highQuality.Load() || bitrate <= lowestBitrate {
+		return false
+	}
+	_, had := denied.LoadOrStore(uri, true)
+	return !had
+}
+
+// lowestBitrate is the bitrate a free account plays at.
+const lowestBitrate = 128000
+
+// ResolveMedia returns the manifest of uri, a track's or a podcast
+// episode's, at the lowest bitrate: 128k, which a free account is licensed
+// to play; the licence of the 256k one it is refused (403). With
+// SetHighQuality it is at the highest, unless refused for uri before.
 func ResolveMedia(uri string) (*Media, error) {
 	formats := append([]string{mediaFormat}, mediaFallbacks...)
 	asked := append(slices.Clone(formats), videoFormat)
@@ -136,6 +169,9 @@ func ResolveMedia(uri string) (*Media, error) {
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Bitrate < files[j].Bitrate })
 	f := files[0]
+	if _, no := denied.Load(uri); highQuality.Load() && !no {
+		f = files[len(files)-1]
+	}
 	if _, err := hex.DecodeString(f.FileID); err != nil || f.FileID == "" {
 		return nil, fmt.Errorf("track-playback: bad file ID %q", f.FileID)
 	}
@@ -159,7 +195,8 @@ var ErrNoAudioHere = errors.New("spotify: nothing of the episode plays here")
 // episodeMedia is how an episode plays that Spotify has no file of for
 // this platform's key system, as the web player in Safari finds most:
 // a video podcast's sound from its video, which is not encrypted, in step
-// with its picture; or else its audio where its podcast keeps it.
+// with its picture; or else its audio where its podcast keeps it, as
+// Spotify names it or as the podcast's own feed does.
 func episodeMedia(uri string, entry mediaEntry, media map[string]mediaEntry) (*Media, error) {
 	duration := time.Duration(entry.Item.Metadata.Duration) * time.Millisecond
 	if id := videoOf(entry, media); id != "" {
@@ -172,9 +209,19 @@ func episodeMedia(uri string, entry mediaEntry, media map[string]mediaEntry) (*M
 		}
 	}
 	for _, f := range entry.Item.Manifest[externalFormat] {
-		if u, err := url.Parse(f.FileURL); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" {
+		if webURL(f.FileURL) {
 			return &Media{File: f.FileURL, Duration: duration}, nil
 		}
+	}
+	meta := entry.Item.Metadata
+	publisher := ""
+	if len(meta.Authors) > 0 {
+		publisher = meta.Authors[0].Name
+	}
+	if file, err := feedAudio(meta.Show, publisher, meta.Name); err != nil {
+		log.Printf("spotify: %s: feed: %v", uri, err)
+	} else if file != "" {
+		return &Media{File: file, Duration: duration}, nil
 	}
 	return nil, ErrNoAudioHere
 }
