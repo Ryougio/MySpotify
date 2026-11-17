@@ -75,16 +75,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.31
-          name: "MySpotify Mobile Edition (v0.4.31)"
+          tag_name: mobile-v0.4.32
+          name: "MySpotify Mobile Edition (Spotify Android 9.1.98 Parity v0.4.32)"
           body: |
-            ### MySpotify Android 客户端 (Windows 桌面端与 Apple Design 1:1 复刻版)
-            - **1:1 复刻桌面端原版美学**：精细还原 Windows 截图中的浅色基调（#f5f5f7 画布、#efeff1 侧栏、纯白卡片与 Apple 红强调色），同时完美支持深色模式。
-            - **底层通信全量重构**：彻底弃用被 429 拦截的 Web API，全面切换至 TOTP HMAC-SHA1 签名与 Spotify 官方 Pathfinder GraphQL 持久化查询引擎（profileAttributes、libraryV3、fetchLibraryTracks、fetchPlaylist、searchTracks）。
-            - **完整同步个人云端**：登录后自动同步个人歌单、已点赞歌曲（我喜欢的音乐）、头像与用户名，解决报错退出登录的问题。
-            - **搜索与点播完全可用**：集成搜索防抖与真实曲库检索，点击任意歌曲即可秒播，无预览曲目自动解析高品质流。
-            - **完整设置页**：实验性功能（进度条烟雾特效、烟雾背景）、缓存管理（用量显示、清除缓存）、网络代理（支持自定义 127.0.0.1:7890 代理）、外观切换（浅色/深色/跟随系统）与账号管理。
-            - **移动端与平板自适应**：手机端无缝呈现底部 5 栏导航与悬浮迷你播放条，上滑即为 Apple Music 逐字双语呼吸歌词大屏。
+            ### MySpotify Android 客户端 (Spotify Android 官方原生交互复刻版)
+            - **官方原版暗黑美学 (#121212)**：基于 Spotify Android (9.1.98) 真实逆向结构与视觉系统，彻底重构移动端体验。
+            - **经典 3-Tab 底部导航**：首页 (Home)、搜索 (Search)、你的音乐库 (Your Library)。
+            - **浮动迷你播放条 (Now Playing Bar)**：圆角浮动卡片停靠于底栏上方，集成封面、歌曲、点赞、播放控制与底部细线进度条。
+            - **沉浸式全屏播放页 (Activity Now Playing)**：动态封面流光背景、大封面、Scrubber 进度条、Spotify 标志性 5 键控制集群与交互式双语逐字歌词卡片。
+            - **真实云端同步**：基于 TOTP HMAC-SHA1 签名与 Pathfinder GraphQL（libraryV3、profileAttributes、fetchLibraryTracks、searchTracks）。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:

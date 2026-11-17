@@ -44,8 +44,8 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         Window window = getWindow();
         window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        window.setStatusBarColor(Color.parseColor("#141416"));
-        window.setNavigationBarColor(Color.parseColor("#141416"));
+        window.setStatusBarColor(Color.parseColor("#121212"));
+        window.setNavigationBarColor(Color.parseColor("#121212"));
 
         webView = new WebView(this);
         setContentView(webView);

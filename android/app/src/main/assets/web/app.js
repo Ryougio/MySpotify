@@ -1,25 +1,25 @@
 /**
- * MySpotify - Apple Design & Windows Desktop Parity Web Engine
- * Fully authentic implementation of MySpotify Windows UI grounded in Apple HIG.
- * Powered by Spotify Pathfinder GraphQL, TOTP Signature, LRCLIB & NetEase Lyrics.
+ * Spotify Mobile Edition (Authentic Android 9.1.98 Parity)
+ * Pure Dark Canvas (#121212), Spotify Green (#1ed760), 3-Tab Bottom Nav,
+ * Floating Mini-Player, Activity Now Playing with Lyrics Card.
+ * Powered by Spotify Pathfinder GraphQL, TOTP Signature, LRCLIB & NetEase.
  */
 
 (function () {
     "use strict";
 
-    // Spotify Pathfinder GraphQL Persisted Query Hashes (from internal/spotify/spotify.go)
+    // Spotify Pathfinder GraphQL Operation Hashes
     const GRAPHQL_OPS = {
         profileAttributes: "08ffb4730af3746e04a8301396f20875dbbce10c75243803091a9274eacc8ac0",
         libraryV3: "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455",
         fetchLibraryTracks: "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240",
         fetchPlaylist: "21ea11a6ac75a5f3e01fd365d29c18e0a4a8b7dc09f89bbb5d73910190c6acaf",
         searchTracks: "b02683192a98dde7966b5e6655a79eeb62713eab703eda9902c932818dd52751",
-        browseAll: "dbd8b55e09a58afc52eab438bc228ba28fd72ac2f2148c6c26354980e4579001",
-        home: "5fb7da7a03ee2776c0670856609cb85a189a3cecc36cc160b91cde79063b9cf1"
+        browseAll: "dbd8b55e09a58afc52eab438bc228ba28fd72ac2f2148c6c26354980e4579001"
     };
 
-    // 高品质精选预设曲目 (离线或访客备用)
-    const DEFAULT_TRACKS = [
+    // 默认高保真推荐曲库 (离线或访客备用)
+    const FEATURED_TRACKS = [
         {
             id: "sp-1",
             title: "Cruel Summer",
@@ -27,7 +27,8 @@
             album: "Lover",
             duration: 178,
             cover: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=85",
-            audioUrl: "https://cdn.freesound.org/previews/612/612088_5674468-lq.mp3"
+            audioUrl: "https://cdn.freesound.org/previews/612/612088_5674468-lq.mp3",
+            color: "#3a1d28"
         },
         {
             id: "sp-2",
@@ -36,7 +37,8 @@
             album: "After Hours",
             duration: 200,
             cover: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&auto=format&fit=crop&q=85",
-            audioUrl: "https://cdn.freesound.org/previews/612/612092_5674468-lq.mp3"
+            audioUrl: "https://cdn.freesound.org/previews/612/612092_5674468-lq.mp3",
+            color: "#4a151b"
         },
         {
             id: "sp-3",
@@ -45,8 +47,31 @@
             album: "Starboy",
             duration: 230,
             cover: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=85",
-            audioUrl: "https://cdn.freesound.org/previews/612/612095_5674468-lq.mp3"
+            audioUrl: "https://cdn.freesound.org/previews/612/612095_5674468-lq.mp3",
+            color: "#1c2638"
+        },
+        {
+            id: "sp-4",
+            title: "As It Was",
+            artist: "Harry Styles",
+            album: "Harry's House",
+            duration: 167,
+            cover: "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=600&auto=format&fit=crop&q=85",
+            audioUrl: "https://cdn.freesound.org/previews/612/612088_5674468-lq.mp3",
+            color: "#283424"
         }
+    ];
+
+    // 分类卡片数据
+    const CATEGORIES = [
+        { name: "流行", color: "#e91e63", img: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=200" },
+        { name: "嘻哈", color: "#f57c00", img: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=200" },
+        { name: "摇滚", color: "#d32f2f", img: "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=200" },
+        { name: "电子 / 舞曲", color: "#00acc1", img: "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=200" },
+        { name: "独立", color: "#00897b", img: "https://images.unsplash.com/photo-1465847899084-d164df4dedc6?w=200" },
+        { name: "华语流行", color: "#7b1fa2", img: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=200" },
+        { name: "车载与自驾", color: "#3949ab", img: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=200" },
+        { name: "专注与学习", color: "#455a64", img: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200" }
     ];
 
     // 全局曲目注册表
@@ -54,41 +79,35 @@
     function registerTrack(t) {
         if (t && t.id) trackRegistry.set(t.id, t);
     }
-    DEFAULT_TRACKS.forEach(registerTrack);
+    FEATURED_TRACKS.forEach(registerTrack);
 
-    // 运行时状态管理
+    // 运行时状态
     const state = {
-        currentPage: "home",
-        history: [],
-        forwardStack: [],
+        currentTab: "home",
         currentTrack: null,
         isPlaying: false,
         currentTime: 0,
         duration: 0,
-        volume: 0.8,
         shuffle: false,
         repeat: false,
         lyrics: [],
         activeLyricIndex: -1,
         likedTrackIds: new Set(["sp-1"]),
-        likedTracks: [...DEFAULT_TRACKS.slice(0, 1)],
+        likedTracks: [...FEATURED_TRACKS.slice(0, 1)],
         userPlaylists: [],
-        savedPlaylists: [],
         currentPlaylist: null,
         user: {
             isLoggedIn: false,
             isGuest: true,
             name: "访客模式",
-            email: "",
-            avatar: "客",
+            avatar: "S",
             avatarUrl: null,
             tier: "免费访客"
         },
-        accessToken: null,
-        theme: "light"
+        accessToken: null
     };
 
-    // Android 原生交互桥接
+    // 原生 Android 桥接
     const Native = {
         toast(msg) {
             if (window.AndroidBridge && window.AndroidBridge.showToast) {
@@ -97,7 +116,7 @@
         },
         vibrate(ms) {
             if (window.AndroidBridge && window.AndroidBridge.vibrate) {
-                window.AndroidBridge.vibrate(ms || 18);
+                window.AndroidBridge.vibrate(ms || 15);
             }
         },
         login() {
@@ -122,12 +141,6 @@
             }
             return { isLoggedIn: false, isGuest: true };
         },
-        getSavedAccessToken() {
-            if (window.AndroidBridge && window.AndroidBridge.getSavedAccessToken) {
-                return window.AndroidBridge.getSavedAccessToken();
-            }
-            return "";
-        },
         fetchAccessToken(callback) {
             if (window.AndroidBridge && window.AndroidBridge.fetchAccessToken) {
                 const cbName = "_cbToken_" + Math.random().toString(36).substring(2, 9);
@@ -140,7 +153,7 @@
                 callback("No AndroidBridge", null);
             }
         },
-        fetchPathfinder(operationName, hash, variables, token, callback) {
+        fetchPathfinder(op, hash, vars, token, callback) {
             if (window.AndroidBridge && window.AndroidBridge.fetchPathfinder) {
                 const cbName = "_cbGql_" + Math.random().toString(36).substring(2, 9);
                 window[cbName] = function (err, res) {
@@ -148,9 +161,9 @@
                     callback(err, res ? JSON.parse(res) : null);
                 };
                 window.AndroidBridge.fetchPathfinder(
-                    operationName,
+                    op,
                     hash,
-                    variables ? JSON.stringify(variables) : "{}",
+                    vars ? JSON.stringify(vars) : "{}",
                     token || state.accessToken || "",
                     "window." + cbName
                 );
@@ -194,9 +207,9 @@
                 callback(null, true);
             }
         },
-        setProxy(proxy) {
+        setProxy(p) {
             if (window.AndroidBridge && window.AndroidBridge.setProxy) {
-                window.AndroidBridge.setProxy(proxy);
+                window.AndroidBridge.setProxy(p);
             }
         },
         getProxy() {
@@ -204,11 +217,6 @@
                 return window.AndroidBridge.getProxy();
             }
             return "";
-        },
-        setStatusBarTheme(dark) {
-            if (window.AndroidBridge && window.AndroidBridge.setStatusBarTheme) {
-                window.AndroidBridge.setStatusBarTheme(dark);
-            }
         },
         playAudio(url, title, artist, album, coverUrl) {
             if (window.AndroidBridge && window.AndroidBridge.playTrack) {
@@ -232,149 +240,84 @@
         }
     };
 
-    // DOM 元素引用
-    const elSidebarSearchInput = document.getElementById("sidebarSearchInput");
-    const elMobileSearchInput = document.getElementById("mobileSearchInput");
-    const elMobileClearSearch = document.getElementById("mobileClearSearch");
-    const elMobileBackBtn = document.getElementById("mobileBackBtn");
-    const elMobilePageTitle = document.getElementById("mobilePageTitle");
-    const elBtnHistoryBack = document.getElementById("btnHistoryBack");
-    const elBtnHistoryForward = document.getElementById("btnHistoryForward");
+    // DOM 引用
+    const elBottomNav = document.getElementById("bottomNav");
+    const elMiniPlayer = document.getElementById("miniPlayerBar");
+    const elMiniCoverImg = document.getElementById("miniCoverImg");
+    const elMiniTitle = document.getElementById("miniTitle");
+    const elMiniArtist = document.getElementById("miniArtist");
+    const elMiniBtnLike = document.getElementById("miniBtnLike");
+    const elMiniBtnPlayPause = document.getElementById("miniBtnPlayPause");
+    const elMiniIconPlay = document.getElementById("miniIconPlay");
+    const elMiniIconPause = document.getElementById("miniIconPause");
+    const elMiniProgressFill = document.getElementById("miniProgressFill");
+    const elMiniMetaClickArea = document.getElementById("miniMetaClickArea");
 
-    // 播放条 DOM
-    const elBarTrackCover = document.getElementById("barTrackCover");
-    const elBarTrackTitle = document.getElementById("barTrackTitle");
-    const elBarTrackArtist = document.getElementById("barTrackArtist");
-    const elBarBtnLike = document.getElementById("barBtnLike");
-    const elBarBtnPlayPause = document.getElementById("barBtnPlayPause");
-    const elIconBarPlay = document.getElementById("iconBarPlay");
-    const elIconBarPause = document.getElementById("iconBarPause");
-    const elBarBtnPrev = document.getElementById("barBtnPrev");
-    const elBarBtnNext = document.getElementById("barBtnNext");
-    const elBarBtnShuffle = document.getElementById("barBtnShuffle");
-    const elBarBtnRepeat = document.getElementById("barBtnRepeat");
-    const elBarTimeCurrent = document.getElementById("barTimeCurrent");
-    const elBarTimeDuration = document.getElementById("barTimeDuration");
-    const elBarScrubTrack = document.getElementById("barScrubTrack");
-    const elBarScrubFill = document.getElementById("barScrubFill");
-    const elBarVolumeRange = document.getElementById("barVolumeRange");
-    const elBarBtnLyrics = document.getElementById("barBtnLyrics");
-    const elBarBtnExpand = document.getElementById("barBtnExpand");
-    const elBarCoverInfoGroup = document.getElementById("barCoverInfoGroup");
-
-    // Fullscreen Sheet DOM
-    const elSheetOverlay = document.getElementById("sheetOverlay");
-    const elBtnDismissSheet = document.getElementById("btnDismissSheet");
-    const elTabArtwork = document.getElementById("tabArtwork");
-    const elTabLyrics = document.getElementById("tabLyrics");
-    const elSheetDualScaffold = document.querySelector(".sheet-dual-scaffold");
-    const elSheetCoverImg = document.getElementById("sheetCoverImg");
-    const elSheetSongTitle = document.getElementById("sheetSongTitle");
-    const elSheetSongArtist = document.getElementById("sheetSongArtist");
-    const elSheetBtnLike = document.getElementById("sheetBtnLike");
-    const elSheetScrubRail = document.getElementById("sheetScrubRail");
-    const elSheetScrubFill = document.getElementById("sheetScrubFill");
-    const elSheetTimeCurrent = document.getElementById("sheetTimeCurrent");
-    const elSheetTimeDuration = document.getElementById("sheetTimeDuration");
-    const elSheetBtnPlayPause = document.getElementById("sheetBtnPlayPause");
-    const elIconSheetPlay = document.getElementById("iconSheetPlay");
-    const elIconSheetPause = document.getElementById("iconSheetPause");
-    const elSheetBtnPrev = document.getElementById("sheetBtnPrev");
-    const elSheetBtnNext = document.getElementById("sheetBtnNext");
-    const elSheetBtnShuffle = document.getElementById("sheetBtnShuffle");
-    const elSheetBtnRepeat = document.getElementById("sheetBtnRepeat");
-    const elSheetLyricsStream = document.getElementById("sheetLyricsStream");
-    const elSheetLyricsViewport = document.getElementById("sheetLyricsViewport");
+    // 全屏播放器 DOM
+    const elNpFullscreen = document.getElementById("npFullscreen");
+    const elBtnDismissNp = document.getElementById("btnDismissNp");
+    const elNpGradientBg = document.getElementById("npGradientBg");
+    const elNpPlayingFrom = document.getElementById("npPlayingFrom");
+    const elNpLargeCoverImg = document.getElementById("npLargeCoverImg");
+    const elNpTrackTitle = document.getElementById("npTrackTitle");
+    const elNpTrackArtist = document.getElementById("npTrackArtist");
+    const elNpBtnLike = document.getElementById("npBtnLike");
+    const elNpScrubRail = document.getElementById("npScrubRail");
+    const elNpScrubFill = document.getElementById("npScrubFill");
+    const elNpTimeCurrent = document.getElementById("npTimeCurrent");
+    const elNpTimeDuration = document.getElementById("npTimeDuration");
+    const elNpBtnShuffle = document.getElementById("npBtnShuffle");
+    const elNpBtnPrev = document.getElementById("npBtnPrev");
+    const elNpBtnPlayPause = document.getElementById("npBtnPlayPause");
+    const elNpIconPlay = document.getElementById("npIconPlay");
+    const elNpIconPause = document.getElementById("npIconPause");
+    const elNpBtnNext = document.getElementById("npBtnNext");
+    const elNpBtnRepeat = document.getElementById("npBtnRepeat");
+    const elLyricsStream = document.getElementById("lyricsStream");
+    const elNpLyricsCard = document.getElementById("npLyricsCard");
+    const elBtnExpandLyrics = document.getElementById("btnExpandLyrics");
 
     // =========================================================================
-    // 路由与页面切换 (支持前进、后退、双端联动)
+    // 选项卡路由与切换 (3大主Tab: home, search, library, 以及 playlist, settings)
     // =========================================================================
-    const PAGE_NAMES = {
-        home: "为你推荐",
-        daily: "每日推荐",
-        charts: "排行榜",
-        browse: "浏览",
-        recent: "最近播放",
-        search: "搜索",
-        liked: "我喜欢的音乐",
-        playlist: "歌单详情",
-        settings: "设置"
-    };
+    function switchTab(tabId) {
+        state.currentTab = tabId;
 
-    function navigateTo(pageId, addToHistory = true) {
-        if (state.currentPage === pageId && pageId !== "playlist") return;
-
-        if (addToHistory && state.currentPage) {
-            state.history.push(state.currentPage);
-            state.forwardStack = [];
-        }
-
-        state.currentPage = pageId;
-        updateViewDisplay();
-    }
-
-    function goBack() {
-        if (state.history.length > 0) {
-            state.forwardStack.push(state.currentPage);
-            const prev = state.history.pop();
-            state.currentPage = prev;
-            updateViewDisplay();
-        }
-    }
-
-    function goForward() {
-        if (state.forwardStack.length > 0) {
-            state.history.push(state.currentPage);
-            const next = state.forwardStack.pop();
-            state.currentPage = next;
-            updateViewDisplay();
-        }
-    }
-
-    function updateViewDisplay() {
-        // 隐藏所有视图
-        document.querySelectorAll(".page-view").forEach(el => el.classList.remove("active"));
-        const targetView = document.getElementById("view" + state.currentPage.charAt(0).toUpperCase() + state.currentPage.slice(1));
+        // 更新内容区展示
+        document.querySelectorAll(".sp-tab-view").forEach(v => v.classList.remove("active"));
+        const targetView = document.getElementById("view" + tabId.charAt(0).toUpperCase() + tabId.slice(1));
         if (targetView) targetView.classList.add("active");
 
-        // 更新侧栏与底部导航高亮
-        document.querySelectorAll(".desktop-sidebar .nav-item").forEach(item => {
-            item.classList.toggle("active", item.getAttribute("data-page") === state.currentPage);
-        });
-        document.querySelectorAll(".mobile-bottom-tabs .tab-item").forEach(tab => {
-            tab.classList.toggle("active", tab.getAttribute("data-page") === state.currentPage);
+        // 更新底部导航选中高亮
+        document.querySelectorAll(".nav-tab").forEach(tab => {
+            tab.classList.toggle("active", tab.getAttribute("data-tab") === tabId);
         });
 
-        // 更新后退/前进按钮可用性
-        elBtnHistoryBack.disabled = state.history.length === 0;
-        elBtnHistoryForward.disabled = state.forwardStack.length === 0;
-        elMobileBackBtn.style.display = state.history.length > 0 ? "flex" : "none";
+        // 详情页时隐藏底部导航，主页/搜索/音乐库时显示
+        const isDetail = (tabId === "playlist" || tabId === "settings");
+        elBottomNav.style.display = isDetail ? "none" : "flex";
 
-        // 更新手机顶部标题
-        elMobilePageTitle.textContent = PAGE_NAMES[state.currentPage] || "MySpotify";
-
-        // 滚动到顶部
-        const scrollContainer = document.getElementById("scrollContent");
-        if (scrollContainer) scrollContainer.scrollTop = 0;
+        // 滚动重置
+        const scroller = document.getElementById("mainScroll");
+        if (scroller) scroller.scrollTop = 0;
     }
 
     // =========================================================================
-    // Spotify Pathfinder GraphQL 数据同步 (核心修复)
+    // Spotify 云端数据同步 (Pathfinder GraphQL)
     // =========================================================================
-    function syncSpotifyData(showFeedback = false) {
+    function syncSpotifyData(showToast = false) {
         const loginStatus = Native.getLoginStatus();
         if (!loginStatus.isLoggedIn) {
-            renderLoggedOutState();
+            renderLoggedOutUI();
             return;
         }
 
-        if (showFeedback) Native.toast("正在同步 Spotify 资料库...");
+        if (showToast) Native.toast("正在连接 Spotify 资料库...");
 
-        // 获取 TOTP 签名的 Access Token
         Native.fetchAccessToken((err, tokenRes) => {
             if (err || !tokenRes || !tokenRes.accessToken) {
-                if (showFeedback) Native.toast("获取 Spotify 凭证失败，请检查网络或重新登录");
-                renderLoggedOutState();
+                if (showToast) Native.toast("获取 Spotify 凭证失败，请检查网络或重新登录");
+                renderLoggedOutUI();
                 return;
             }
 
@@ -382,7 +325,7 @@
             state.user.isLoggedIn = true;
             state.user.isGuest = false;
 
-            // 1. 获取用户属性 (profileAttributes)
+            // 1. 用户个人档案
             Native.fetchPathfinder("profileAttributes", GRAPHQL_OPS.profileAttributes, {}, state.accessToken, (pErr, pData) => {
                 if (!pErr && pData && pData.data && pData.data.me && pData.data.me.profile) {
                     const prof = pData.data.me.profile;
@@ -391,11 +334,11 @@
                     state.user.avatar = state.user.name.charAt(0).toUpperCase();
                     state.user.tier = "Spotify 账号在线";
                     saveUserCache();
-                    renderUserAccountUI();
+                    renderAccountUI();
                 }
             });
 
-            // 2. 获取用户资料库歌单与点赞统计 (libraryV3)
+            // 2. 音乐库歌单
             const libVars = {
                 filters: [],
                 order: null,
@@ -411,60 +354,50 @@
             Native.fetchPathfinder("libraryV3", GRAPHQL_OPS.libraryV3, libVars, state.accessToken, (lErr, lData) => {
                 if (!lErr && lData && lData.data && lData.data.me && lData.data.me.libraryV3) {
                     const items = lData.data.me.libraryV3.items || [];
-                    const myPls = [];
-                    const savedPls = [];
-
+                    const pls = [];
                     items.forEach(it => {
                         const d = it.item && it.item.data ? it.item.data : null;
                         if (!d) return;
 
                         if (d.__typename === "PseudoPlaylist" || (d.uri && d.uri.includes("collection"))) {
                             const count = d.content ? d.content.totalCount : (d.totalCount || 0);
-                            document.getElementById("likedMetaText").textContent = `共 ${count} 首歌曲`;
+                            document.getElementById("libLikedCountText").textContent = `📌 播放列表 · ${count} 首歌曲`;
                             return;
                         }
 
                         if (d.__typename === "Playlist" || d.name) {
-                            const pl = {
+                            pls.push({
                                 id: d.uri || d.id,
                                 name: d.name,
                                 cover: d.images && d.images.items && d.images.items[0] && d.images.items[0].sources ? d.images.items[0].sources[0].url : "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300",
                                 count: d.content ? d.content.totalCount : (d.tracks ? d.tracks.totalCount : 0),
                                 owner: d.ownerV2 && d.ownerV2.data ? (d.ownerV2.data.name || d.ownerV2.data.username) : "Spotify"
-                            };
-
-                            if (d.ownerV2 && d.ownerV2.data && d.ownerV2.data.username === state.user.name) {
-                                myPls.push(pl);
-                            } else {
-                                savedPls.push(pl);
-                            }
+                            });
                         }
                     });
 
-                    state.userPlaylists = myPls;
-                    state.savedPlaylists = savedPls;
-                    renderPlaylistsNav();
-                    if (showFeedback) Native.toast("已成功同步 Spotify 资料库！");
+                    state.userPlaylists = pls;
+                    renderLibraryPlaylists(pls);
+                    if (showToast) Native.toast("Spotify 资料库同步完成！");
                 }
             });
 
-            // 3. 获取已点赞歌曲 (fetchLibraryTracks)
+            // 3. 已点赞歌曲
             Native.fetchPathfinder("fetchLibraryTracks", GRAPHQL_OPS.fetchLibraryTracks, { offset: 0, limit: 50 }, state.accessToken, (tErr, tData) => {
                 if (!tErr && tData && tData.data && tData.data.me && tData.data.me.library) {
-                    const rawItems = tData.data.me.library.tracks ? tData.data.me.library.tracks.items : [];
-                    const tracks = rawItems.map(item => parsePathfinderTrack(item.track ? item.track.data : null)).filter(Boolean);
+                    const raw = tData.data.me.library.tracks ? tData.data.me.library.tracks.items : [];
+                    const tracks = raw.map(item => parseGqlTrack(item.track ? item.track.data : null)).filter(Boolean);
                     if (tracks.length > 0) {
                         state.likedTracks = tracks;
                         tracks.forEach(t => state.likedTrackIds.add(t.id));
-                        renderTracksList(tracks, document.getElementById("likedTracksList"));
-                        document.getElementById("likedMetaText").textContent = `共 ${tracks.length} 首歌曲`;
+                        document.getElementById("libLikedCountText").textContent = `📌 播放列表 · ${tracks.length} 首歌曲`;
                     }
                 }
             });
         });
     }
 
-    function parsePathfinderTrack(d) {
+    function parseGqlTrack(d) {
         if (!d) return null;
         const id = d.id || (d.uri ? d.uri.replace("spotify:track:", "") : ("sp_" + Math.random().toString(36).substring(2, 7)));
         const artists = d.artists && d.artists.items ? d.artists.items.map(a => a.profile ? a.profile.name : (a.name || "")).join(", ") : "Spotify Artist";
@@ -479,168 +412,162 @@
 
         const trackObj = {
             id: id,
-            title: d.name || "未知歌曲",
+            title: d.name || "未知曲目",
             artist: artists,
             album: d.albumOfTrack ? d.albumOfTrack.name : (d.album ? d.album.name : ""),
             duration: durSec,
             cover: cover,
-            audioUrl: "resolve:" + (d.name || "") + " " + artists
+            audioUrl: "resolve:" + (d.name || "") + " " + artists,
+            color: "#301d2b"
         };
-
         registerTrack(trackObj);
         return trackObj;
     }
 
-    function renderLoggedOutState() {
+    function renderLoggedOutUI() {
         state.user.isLoggedIn = false;
         state.user.isGuest = true;
         state.user.name = "访客模式";
-        state.user.avatar = "客";
+        state.user.avatar = "S";
         state.user.avatarUrl = null;
         state.user.tier = "免费访客";
-        renderUserAccountUI();
+        renderAccountUI();
     }
 
-    function renderUserAccountUI() {
-        const avatarEl = document.getElementById("sidebarUserAvatar");
-        const nameEl = document.getElementById("sidebarUserName");
-        const sAvatarEl = document.getElementById("settingsUserAvatar");
-        const sNameEl = document.getElementById("settingsAccountName");
-        const sEmailEl = document.getElementById("settingsAccountEmail");
-        const sTierEl = document.getElementById("settingsAccountTier");
-        const btnLogin = document.getElementById("btnSettingsLogin");
-        const btnSync = document.getElementById("btnSettingsSync");
-        const btnLogout = document.getElementById("btnSettingsLogout");
-        const mobileLetter = document.getElementById("mobileAvatarLetter");
+    function renderAccountUI() {
+        const avatars = [
+            document.getElementById("homeAvatarLetter"),
+            document.getElementById("searchAvatarLetter"),
+            document.getElementById("libAvatarLetter")
+        ];
+        const sAvatar = document.getElementById("settingsUserAvatar");
+        const sName = document.getElementById("settingsAccountName");
+        const sEmail = document.getElementById("settingsAccountEmail");
+        const sTier = document.getElementById("settingsAccountTier");
+        const rowLogin = document.getElementById("rowLogin");
+        const rowSync = document.getElementById("rowSync");
+        const rowLogout = document.getElementById("rowLogout");
+
+        avatars.forEach(el => {
+            if (el) el.textContent = state.user.avatar;
+        });
 
         if (state.user.avatarUrl) {
-            const imgHtml = `<img src="${state.user.avatarUrl}" alt="Avatar">`;
-            avatarEl.innerHTML = imgHtml;
-            sAvatarEl.innerHTML = imgHtml;
+            sAvatar.innerHTML = `<img src="${state.user.avatarUrl}" alt="Avatar">`;
         } else {
-            avatarEl.innerHTML = `<span class="avatar-letter">${state.user.avatar}</span>`;
-            sAvatarEl.innerHTML = `<span class="avatar-letter">${state.user.avatar}</span>`;
+            sAvatar.innerHTML = `<span class="avatar-letter">${state.user.avatar}</span>`;
         }
-        mobileLetter.textContent = state.user.avatar;
 
-        nameEl.textContent = state.user.name;
-        sNameEl.textContent = state.user.name;
-        sEmailEl.textContent = state.user.isLoggedIn ? "已关联 Spotify 账号" : "登录 Spotify 即可完整同步歌单与点赞";
-        sTierEl.textContent = state.user.tier;
+        sName.textContent = state.user.name;
+        sEmail.textContent = state.user.isLoggedIn ? "已关联 Spotify 账号" : "登录 Spotify 同步个人音乐库";
+        sTier.textContent = state.user.tier;
 
         if (state.user.isLoggedIn) {
-            btnLogin.style.display = "none";
-            btnSync.style.display = "inline-block";
-            btnLogout.style.display = "inline-block";
+            rowLogin.style.display = "none";
+            rowSync.style.display = "flex";
+            rowLogout.style.display = "flex";
         } else {
-            btnLogin.style.display = "inline-block";
-            btnSync.style.display = "none";
-            btnLogout.style.display = "none";
+            rowLogin.style.display = "flex";
+            rowSync.style.display = "none";
+            rowLogout.style.display = "none";
         }
     }
 
     function saveUserCache() {
         try {
-            localStorage.setItem("myspotify_user", JSON.stringify(state.user));
+            localStorage.setItem("myspotify_m_user", JSON.stringify(state.user));
         } catch (e) {}
     }
 
     function loadUserCache() {
         try {
-            const raw = localStorage.getItem("myspotify_user");
-            if (raw) {
-                const u = JSON.parse(raw);
-                if (u && u.name) Object.assign(state.user, u);
-            }
+            const raw = localStorage.getItem("myspotify_m_user");
+            if (raw) Object.assign(state.user, JSON.parse(raw));
         } catch (e) {}
     }
 
-    function renderPlaylistsNav() {
-        const myContainer = document.getElementById("sidebarMyPlaylists");
-        const savedContainer = document.getElementById("sidebarSavedPlaylists");
-
-        myContainer.innerHTML = "";
-        savedContainer.innerHTML = "";
-
-        state.userPlaylists.forEach(pl => {
-            const el = document.createElement("div");
-            el.className = "playlist-nav-item";
-            el.innerHTML = `
-                <img src="${pl.cover}" class="playlist-thumb-img" alt="Cover">
-                <span class="playlist-nav-title">${pl.name}</span>
+    // =========================================================================
+    // 渲染模块：歌单、曲目与探索卡片
+    // =========================================================================
+    function renderLibraryPlaylists(pls) {
+        const container = document.getElementById("libraryPlaylistsContainer");
+        container.innerHTML = "";
+        pls.forEach(pl => {
+            const row = document.createElement("div");
+            row.className = "sp-library-row";
+            row.innerHTML = `
+                <div class="lib-cover-box">
+                    <img src="${pl.cover}" alt="Cover">
+                </div>
+                <div class="lib-meta-col">
+                    <span class="lib-row-title">${pl.name}</span>
+                    <span class="lib-row-sub">播放列表 · ${pl.owner}</span>
+                </div>
             `;
-            el.addEventListener("click", () => openPlaylist(pl));
-            myContainer.appendChild(el);
-        });
-
-        state.savedPlaylists.forEach(pl => {
-            const el = document.createElement("div");
-            el.className = "playlist-nav-item";
-            el.innerHTML = `
-                <img src="${pl.cover}" class="playlist-thumb-img" alt="Cover">
-                <span class="playlist-nav-title">${pl.name}</span>
-            `;
-            el.addEventListener("click", () => openPlaylist(pl));
-            savedContainer.appendChild(el);
+            row.addEventListener("click", () => openPlaylist(pl));
+            container.appendChild(row);
         });
     }
 
     function openPlaylist(pl) {
         state.currentPlaylist = pl;
-        document.getElementById("playlistMainTitle").textContent = pl.name;
-        document.getElementById("playlistOwnerDesc").textContent = `${pl.owner || "Spotify"} · ${pl.count || 0} 首歌曲`;
-        document.getElementById("playlistCoverImg").src = pl.cover;
+        document.getElementById("playlistNavTitle").textContent = pl.name;
+        document.getElementById("playlistHeroName").textContent = pl.name;
+        document.getElementById("playlistHeroMeta").textContent = `${pl.owner || "Spotify"} · ${pl.count || 0} 首歌曲`;
+        document.getElementById("playlistHeroCover").src = pl.cover;
 
-        navigateTo("playlist");
+        switchTab("playlist");
 
-        // 从 Spotify Pathfinder 获取歌单完整曲目
+        // 若为我喜欢的音乐
+        if (pl.id === "liked") {
+            renderTracksList(state.likedTracks, document.getElementById("playlistTracksList"));
+            return;
+        }
+
+        // Spotify 云端歌单拉取曲目
         if (state.accessToken && pl.id && pl.id.includes("spotify:playlist:")) {
             const vars = { uri: pl.id, offset: 0, limit: 100, enableWatchFeedEntrypoint: false };
             Native.fetchPathfinder("fetchPlaylist", GRAPHQL_OPS.fetchPlaylist, vars, state.accessToken, (err, res) => {
                 if (!err && res && res.data && res.data.playlistV2 && res.data.playlistV2.content) {
                     const items = res.data.playlistV2.content.items || [];
-                    const tracks = items.map(it => parsePathfinderTrack(it.itemV2 ? it.itemV2.data : null)).filter(Boolean);
+                    const tracks = items.map(it => parseGqlTrack(it.itemV2 ? it.itemV2.data : null)).filter(Boolean);
                     renderTracksList(tracks, document.getElementById("playlistTracksList"));
                 }
             });
         }
     }
 
-    // =========================================================================
-    // 渲染曲目列表与卡片
-    // =========================================================================
     function renderTracksList(tracks, containerEl) {
         if (!containerEl) return;
         containerEl.innerHTML = "";
 
         if (!tracks || tracks.length === 0) {
-            containerEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">暂无曲目</div>`;
+            containerEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--sp-text-subdued);font-size:13px;">暂无曲目</div>`;
             return;
         }
 
-        tracks.forEach((t, idx) => {
+        tracks.forEach(t => {
             registerTrack(t);
-            const row = document.createElement("div");
-            row.className = "track-row";
+            const item = document.createElement("div");
+            item.className = "sp-track-item";
             const isLiked = state.likedTrackIds.has(t.id);
+            const isPlayingThis = state.currentTrack && state.currentTrack.id === t.id;
 
-            row.innerHTML = `
-                <span class="track-row-index">${idx + 1}</span>
-                <img src="${t.cover}" class="track-row-cover" alt="Cover">
-                <div class="track-row-info">
-                    <span class="track-row-name">${t.title}</span>
-                    <span class="track-row-artist">${t.artist}</span>
+            item.innerHTML = `
+                <img src="${t.cover}" class="track-thumb-img" alt="Cover">
+                <div class="track-meta-stack">
+                    <span class="track-main-name ${isPlayingThis ? 'playing' : ''}">${t.title}</span>
+                    <span class="track-sub-artist">${t.artist}</span>
                 </div>
-                <span class="track-row-duration">${formatTime(t.duration)}</span>
-                <button class="track-row-like ${isLiked ? 'liked' : ''}">
-                    <svg viewBox="0 0 24 24" fill="${isLiked ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <button class="track-action-btn ${isLiked ? 'liked' : ''}">
+                    <svg viewBox="0 0 24 24" fill="${isLiked ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="18" height="18">
                         <path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>
                     </svg>
                 </button>
             `;
 
-            row.addEventListener("click", (e) => {
-                if (e.target.closest(".track-row-like")) {
+            item.addEventListener("click", (e) => {
+                if (e.target.closest(".track-action-btn")) {
                     e.stopPropagation();
                     toggleLikeTrack(t);
                     return;
@@ -648,7 +575,7 @@
                 playTrack(t);
             });
 
-            containerEl.appendChild(row);
+            containerEl.appendChild(item);
         });
     }
 
@@ -657,23 +584,23 @@
         if (state.likedTrackIds.has(track.id)) {
             state.likedTrackIds.delete(track.id);
             state.likedTracks = state.likedTracks.filter(t => t.id !== track.id);
-            Native.toast("已从已点赞歌曲中移除");
+            Native.toast("已从已点赞歌曲移除");
         } else {
             state.likedTrackIds.add(track.id);
             state.likedTracks.unshift(track);
-            Native.toast("已添加到我喜欢的音乐");
+            Native.toast("已添加到已点赞歌曲");
         }
-        updateLikeButtons();
+        updateLikeState();
     }
 
-    function updateLikeButtons() {
+    function updateLikeState() {
         if (!state.currentTrack) return;
-        const isLiked = state.likedTrackIds.has(state.currentTrack.id);
-        elBarBtnLike.classList.toggle("liked", isLiked);
-        elBarBtnLike.querySelector("svg").setAttribute("fill", isLiked ? "currentColor" : "none");
+        const liked = state.likedTrackIds.has(state.currentTrack.id);
+        elMiniBtnLike.classList.toggle("liked", liked);
+        elMiniBtnLike.querySelector("svg").setAttribute("fill", liked ? "currentColor" : "none");
 
-        elSheetBtnLike.classList.toggle("liked", isLiked);
-        elSheetBtnLike.querySelector("svg").setAttribute("fill", isLiked ? "currentColor" : "none");
+        elNpBtnLike.classList.toggle("liked", liked);
+        elNpBtnLike.querySelector("svg").setAttribute("fill", liked ? "currentColor" : "none");
     }
 
     // =========================================================================
@@ -686,30 +613,34 @@
         state.currentTime = 0;
         state.duration = track.duration || 180;
 
-        // 更新界面
-        elBarTrackCover.src = track.cover;
-        elBarTrackTitle.textContent = track.title;
-        elBarTrackArtist.textContent = track.artist;
-        elBarTimeDuration.textContent = formatTime(state.duration);
+        // 更新迷你播放条
+        elMiniCoverImg.src = track.cover;
+        elMiniTitle.textContent = track.title;
+        elMiniArtist.textContent = track.artist;
+        elMiniPlayer.style.display = "flex";
 
-        elSheetCoverImg.src = track.cover;
-        elSheetSongTitle.textContent = track.title;
-        elSheetSongArtist.textContent = track.artist;
-        elSheetTimeDuration.textContent = formatTime(state.duration);
+        // 更新全屏播放界面
+        elNpLargeCoverImg.src = track.cover;
+        elNpTrackTitle.textContent = track.title;
+        elNpTrackArtist.textContent = track.artist;
+        elNpTimeDuration.textContent = formatTime(state.duration);
+        if (track.color) {
+            elNpGradientBg.style.background = `linear-gradient(180deg, ${track.color} 0%, #121212 65%)`;
+        }
 
         updatePlayPauseIcons(true);
-        updateLikeButtons();
+        updateLikeState();
 
-        // 触发 Android 原生播放服务
+        // 唤醒 Android 前台播放服务
         Native.playAudio(track.audioUrl, track.title, track.artist, track.album || "Spotify", track.cover);
 
-        // 获取多源逐字歌词
-        fetchAndRenderLyrics(track);
+        // 加载双语逐字歌词
+        fetchLyrics(track);
     }
 
     function togglePlay() {
         if (!state.currentTrack) {
-            if (DEFAULT_TRACKS.length > 0) playTrack(DEFAULT_TRACKS[0]);
+            if (FEATURED_TRACKS.length > 0) playTrack(FEATURED_TRACKS[0]);
             return;
         }
 
@@ -725,25 +656,22 @@
     }
 
     function updatePlayPauseIcons(playing) {
-        elIconBarPlay.style.display = playing ? "none" : "block";
-        elIconBarPause.style.display = playing ? "block" : "none";
-        elIconSheetPlay.style.display = playing ? "none" : "block";
-        elIconSheetPause.style.display = playing ? "block" : "none";
+        elMiniIconPlay.style.display = playing ? "none" : "block";
+        elMiniIconPause.style.display = playing ? "block" : "none";
+        elNpIconPlay.style.display = playing ? "none" : "block";
+        elNpIconPause.style.display = playing ? "block" : "none";
     }
 
-    function updatePlaybackProgress(sec, dur) {
+    function updateProgress(sec, dur) {
         state.currentTime = sec;
         if (dur > 0) state.duration = dur;
 
-        const percent = Math.min(100, Math.max(0, (state.currentTime / state.duration) * 100));
-        elBarTimeCurrent.textContent = formatTime(state.currentTime);
-        elBarScrubFill.style.width = percent + "%";
+        const frac = Math.min(100, Math.max(0, (state.currentTime / state.duration) * 100));
+        elMiniProgressFill.style.width = frac + "%";
+        elNpScrubFill.style.width = frac + "%";
+        elNpTimeCurrent.textContent = formatTime(state.currentTime);
 
-        elSheetTimeCurrent.textContent = formatTime(state.currentTime);
-        elSheetScrubFill.style.width = percent + "%";
-
-        // 更新逐字歌词高亮
-        syncLyricsWithTime(sec);
+        syncLyrics(sec);
     }
 
     function formatTime(seconds) {
@@ -754,60 +682,61 @@
     }
 
     // =========================================================================
-    // 多源逐字歌词引擎 (LRCLIB + 网易云双语)
+    // 歌词解析与实时逐字联动
     // =========================================================================
-    function fetchAndRenderLyrics(track) {
-        elSheetLyricsStream.innerHTML = `<div class="lyrics-empty-placeholder">正在获取高精双语逐字歌词...</div>`;
+    function fetchLyrics(track) {
+        elLyricsStream.innerHTML = `<div class="lyrics-loading-text">正在同步歌词...</div>`;
         state.lyrics = [];
         state.activeLyricIndex = -1;
 
         Native.fetchLyrics(track.id, track.title, track.artist, track.duration, (err, lyricsArr) => {
             if (!err && lyricsArr && lyricsArr.length > 0) {
                 state.lyrics = lyricsArr;
-                renderLyricsLines(lyricsArr);
+                renderLyrics(lyricsArr);
             } else {
-                elSheetLyricsStream.innerHTML = `<div class="lyrics-empty-placeholder">纯音乐，享受旋律</div>`;
+                elLyricsStream.innerHTML = `<div class="lyrics-loading-text">享受旋律，暂无歌词</div>`;
             }
         });
     }
 
-    function renderLyricsLines(lines) {
-        elSheetLyricsStream.innerHTML = "";
-        lines.forEach((line, idx) => {
-            const item = document.createElement("div");
-            item.className = "lyric-line-item";
-            item.setAttribute("data-index", idx);
-            item.innerHTML = `
-                <div class="lyric-main-text">${line.text}</div>
-                ${line.trans ? `<div class="lyric-translation">${line.trans}</div>` : ""}
+    function renderLyrics(lines) {
+        elLyricsStream.innerHTML = "";
+        lines.forEach((l, idx) => {
+            const box = document.createElement("div");
+            box.className = "lyric-line-box";
+            box.setAttribute("data-idx", idx);
+            box.innerHTML = `
+                <div class="lyric-main-text">${l.text}</div>
+                ${l.trans ? `<div class="lyric-trans-line">${l.trans}</div>` : ""}
             `;
-            item.addEventListener("click", () => {
-                Native.seekAudio(Math.floor(line.time * 1000));
+            box.addEventListener("click", (e) => {
+                e.stopPropagation();
+                Native.seekAudio(Math.floor(l.time * 1000));
             });
-            elSheetLyricsStream.appendChild(item);
+            elLyricsStream.appendChild(box);
         });
     }
 
-    function syncLyricsWithTime(currentSec) {
+    function syncLyrics(sec) {
         if (!state.lyrics || state.lyrics.length === 0) return;
 
-        let activeIdx = -1;
+        let active = -1;
         for (let i = 0; i < state.lyrics.length; i++) {
-            if (state.lyrics[i].time <= currentSec + 0.3) {
-                activeIdx = i;
+            if (state.lyrics[i].time <= sec + 0.3) {
+                active = i;
             } else {
                 break;
             }
         }
 
-        if (activeIdx !== state.activeLyricIndex && activeIdx >= 0) {
-            state.activeLyricIndex = activeIdx;
-            const items = elSheetLyricsStream.querySelectorAll(".lyric-line-item");
-            items.forEach((item, idx) => {
-                const isActive = idx === activeIdx;
-                item.classList.toggle("active", isActive);
+        if (active !== state.activeLyricIndex && active >= 0) {
+            state.activeLyricIndex = active;
+            const boxes = elLyricsStream.querySelectorAll(".lyric-line-box");
+            boxes.forEach((b, idx) => {
+                const isActive = (idx === active);
+                b.classList.toggle("active", isActive);
                 if (isActive) {
-                    item.scrollIntoView({ behavior: "smooth", block: "center" });
+                    b.scrollIntoView({ behavior: "smooth", block: "center" });
                 }
             });
         }
@@ -816,296 +745,242 @@
     // =========================================================================
     // 搜索模块 (Pathfinder searchTracks)
     // =========================================================================
-    let searchDebounceTimer = null;
-    function handleSearchInput(query) {
-        clearTimeout(searchDebounceTimer);
-        const q = (query || "").trim();
+    let searchTimer = null;
+    function onSearchChange(val) {
+        clearTimeout(searchTimer);
+        const q = (val || "").trim();
+        const browseSec = document.getElementById("browseAllSection");
+        const resultsSec = document.getElementById("searchResultsSection");
+        const clearBtn = document.getElementById("btnClearSearch");
+
+        clearBtn.style.display = q ? "block" : "none";
+
         if (!q) {
-            document.getElementById("searchResultsArea").innerHTML = `
-                <div class="empty-state-notice">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-                    <span>输入关键字探索 Spotify 海量曲库</span>
-                </div>
-            `;
+            browseSec.style.display = "block";
+            resultsSec.style.display = "none";
             return;
         }
 
-        searchDebounceTimer = setTimeout(() => {
-            executeSearch(q);
+        browseSec.style.display = "none";
+        resultsSec.style.display = "block";
+
+        const listEl = document.getElementById("searchResultsList");
+        listEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--sp-text-subdued);font-size:13px;">正在搜索 "${q}"...</div>`;
+
+        searchTimer = setTimeout(() => {
+            const vars = {
+                searchTerm: q,
+                offset: 0,
+                limit: 20,
+                numberOfTopResults: 20,
+                includeAudiobooks: false,
+                includePreReleases: false,
+                includeAuthors: false
+            };
+            Native.fetchPathfinder("searchTracks", GRAPHQL_OPS.searchTracks, vars, state.accessToken, (err, res) => {
+                if (!err && res && res.data && res.data.searchV2 && res.data.searchV2.tracksV2) {
+                    const items = res.data.searchV2.tracksV2.items || [];
+                    const tracks = items.map(it => parseGqlTrack(it.item ? it.item.data : null)).filter(Boolean);
+                    renderTracksList(tracks, listEl);
+                } else {
+                    listEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--sp-text-subdued);font-size:13px;">未检索到相关曲目</div>`;
+                }
+            });
         }, 320);
     }
 
-    function executeSearch(query) {
-        navigateTo("search");
-        document.getElementById("searchResultsArea").innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">正在搜索 "${query}"...</div>`;
+    // =========================================================================
+    // 全屏播放器交互
+    // =========================================================================
+    function openFullscreen() {
+        elNpFullscreen.classList.add("open");
+    }
 
-        const vars = {
-            searchTerm: query,
-            offset: 0,
-            limit: 20,
-            numberOfTopResults: 20,
-            includeAudiobooks: false,
-            includePreReleases: false,
-            includeAuthors: false
-        };
+    function dismissFullscreen() {
+        elNpFullscreen.classList.remove("open");
+        elNpLyricsCard.classList.remove("expanded");
+        elBtnExpandLyrics.textContent = "全屏查看";
+    }
 
-        Native.fetchPathfinder("searchTracks", GRAPHQL_OPS.searchTracks, vars, state.accessToken, (err, res) => {
-            if (!err && res && res.data && res.data.searchV2 && res.data.searchV2.tracksV2) {
-                const items = res.data.searchV2.tracksV2.items || [];
-                const tracks = items.map(it => parsePathfinderTrack(it.item ? it.item.data : null)).filter(Boolean);
-                const area = document.getElementById("searchResultsArea");
-                area.innerHTML = `<div class="tracks-card-container"><div class="track-list-body" id="searchResultsList"></div></div>`;
-                renderTracksList(tracks, document.getElementById("searchResultsList"));
-            } else {
-                document.getElementById("searchResultsArea").innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">搜索未返回结果，请检查网络或更换关键词</div>`;
+    // =========================================================================
+    // 初始化事件绑定
+    // =========================================================================
+    function initEvents() {
+        // 底部导航栏切换
+        document.querySelectorAll(".nav-tab").forEach(tab => {
+            tab.addEventListener("click", () => {
+                const t = tab.getAttribute("data-tab");
+                if (t) switchTab(t);
+            });
+        });
+
+        // 首页快捷卡片
+        document.getElementById("cardLikedSongs").addEventListener("click", () => {
+            openPlaylist({ id: "liked", name: "已点赞的歌曲", owner: "我", count: state.likedTracks.length, cover: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300" });
+        });
+        document.getElementById("cardDailyMix").addEventListener("click", () => {
+            if (FEATURED_TRACKS.length > 0) playTrack(FEATURED_TRACKS[0]);
+        });
+
+        // 音乐库我喜欢的歌曲
+        document.getElementById("libRowLiked").addEventListener("click", () => {
+            openPlaylist({ id: "liked", name: "已点赞的歌曲", owner: "我", count: state.likedTracks.length, cover: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300" });
+        });
+
+        // 顶部设置与返回
+        document.getElementById("btnOpenSettings").addEventListener("click", () => switchTab("settings"));
+        document.getElementById("btnSettingsBack").addEventListener("click", () => switchTab("home"));
+        document.getElementById("btnPlaylistBack").addEventListener("click", () => switchTab("library"));
+        document.getElementById("btnSyncLibrary").addEventListener("click", () => syncSpotifyData(true));
+
+        // 迷你播放栏
+        elMiniMetaClickArea.addEventListener("click", openFullscreen);
+        elMiniCoverImg.addEventListener("click", openFullscreen);
+        elMiniBtnPlayPause.addEventListener("click", togglePlay);
+        elMiniBtnLike.addEventListener("click", () => toggleLikeTrack(state.currentTrack));
+
+        // 全屏播放器
+        elBtnDismissNp.addEventListener("click", dismissFullscreen);
+        elNpBtnPlayPause.addEventListener("click", togglePlay);
+        elNpBtnLike.addEventListener("click", () => toggleLikeTrack(state.currentTrack));
+
+        elNpBtnPrev.addEventListener("click", () => {
+            Native.toast("上一首");
+            if (FEATURED_TRACKS.length > 0) playTrack(FEATURED_TRACKS[1]);
+        });
+        elNpBtnNext.addEventListener("click", () => {
+            Native.toast("下一首");
+            if (FEATURED_TRACKS.length > 0) playTrack(FEATURED_TRACKS[2]);
+        });
+
+        elNpBtnShuffle.addEventListener("click", () => {
+            state.shuffle = !state.shuffle;
+            elNpBtnShuffle.classList.toggle("active", state.shuffle);
+            Native.toast(state.shuffle ? "随机播放开启" : "随机播放关闭");
+        });
+        elNpBtnRepeat.addEventListener("click", () => {
+            state.repeat = !state.repeat;
+            elNpBtnRepeat.classList.toggle("active", state.repeat);
+            Native.toast(state.repeat ? "单曲循环" : "列表循环");
+        });
+
+        // 进度拖动
+        elNpScrubRail.addEventListener("click", (e) => {
+            const rect = elNpScrubRail.getBoundingClientRect();
+            const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            Native.seekAudio(Math.floor(frac * state.duration * 1000));
+        });
+
+        // 歌词卡片展开
+        elBtnExpandLyrics.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const isExp = elNpLyricsCard.classList.toggle("expanded");
+            elBtnExpandLyrics.textContent = isExp ? "收起" : "全屏查看";
+        });
+        elNpLyricsCard.addEventListener("click", () => {
+            if (!elNpLyricsCard.classList.contains("expanded")) {
+                elNpLyricsCard.classList.add("expanded");
+                elBtnExpandLyrics.textContent = "收起";
             }
         });
-    }
 
-    // =========================================================================
-    // 全屏 Sheet 展开与收起
-    // =========================================================================
-    function openFullscreenSheet() {
-        elSheetOverlay.classList.add("open");
-        Native.setStatusBarTheme(true);
-    }
+        // 搜索输入
+        const searchIn = document.getElementById("searchInput");
+        searchIn.addEventListener("input", (e) => onSearchChange(e.target.value));
+        document.getElementById("btnClearSearch").addEventListener("click", () => {
+            searchIn.value = "";
+            onSearchChange("");
+        });
 
-    function dismissFullscreenSheet() {
-        elSheetOverlay.classList.remove("open");
-        Native.setStatusBarTheme(state.theme === "dark");
-    }
+        // 歌单全量播放
+        document.getElementById("btnPlayAllInHero").addEventListener("click", () => {
+            if (state.likedTracks.length > 0) playTrack(state.likedTracks[0]);
+        });
 
-    // =========================================================================
-    // 设置项绑定与缓存管理
-    // =========================================================================
-    function initSettings() {
-        // 读取代理
+        // 设置动作
+        document.getElementById("btnActionLogin").addEventListener("click", () => Native.login());
+        document.getElementById("btnActionSync").addEventListener("click", () => syncSpotifyData(true));
+        document.getElementById("btnActionLogout").addEventListener("click", () => {
+            Native.logout();
+            renderLoggedOutUI();
+            Native.toast("已退出登录，恢复访客模式");
+        });
+
+        // 代理
         const savedProxy = Native.getProxy();
         if (savedProxy) document.getElementById("inputProxy").value = savedProxy;
-
         document.getElementById("btnSaveProxy").addEventListener("click", () => {
             const p = document.getElementById("inputProxy").value.trim();
             Native.setProxy(p);
             Native.toast(p ? "已保存代理: " + p : "已恢复系统默认代理");
         });
 
-        // 缓存大小
+        // 缓存
         Native.getCacheSize((err, res) => {
             if (!err && res && res.formatted) {
-                document.getElementById("settingsCacheInfo").textContent = `听过的歌曲（加密的）保存在本机，再次播放更快、不耗流量，但仍要联网授权；已用 ${res.formatted}`;
+                document.getElementById("settingsCacheDesc").textContent = `已用缓存: ${res.formatted}`;
             }
         });
-
-        // 清除缓存
         document.getElementById("btnClearCache").addEventListener("click", () => {
             Native.clearCache((err, ok) => {
                 if (ok) {
-                    Native.toast("缓存已全部清除");
-                    document.getElementById("settingsCacheInfo").textContent = "听过的歌曲（加密的）保存在本机，再次播放更快、不耗流量，但仍要联网授权；已用 0 B";
+                    Native.toast("缓存已成功清除");
+                    document.getElementById("settingsCacheDesc").textContent = "已用缓存: 0 B";
                 }
             });
         });
-
-        // 更改缓存目录提示
-        document.getElementById("btnChangeCacheDir").addEventListener("click", () => {
-            Native.toast("Android 端统一由应用专属沙盒存储，无需手动更改");
-        });
-
-        // 检查更新
-        document.getElementById("btnCheckUpdate").addEventListener("click", () => {
-            Native.toast("当前版本 v0.4.30 为最新发布版本");
-        });
-
-        // 登录/退出/同步按钮
-        document.getElementById("btnSettingsLogin").addEventListener("click", () => Native.login());
-        document.getElementById("btnSettingsSync").addEventListener("click", () => syncSpotifyData(true));
-        document.getElementById("btnSettingsLogout").addEventListener("click", () => {
-            Native.logout();
-            renderLoggedOutState();
-            Native.toast("已退出登录，恢复访客模式");
-        });
-
-        // 外观模式切换
-        const segControl = document.getElementById("appearanceSegment");
-        segControl.querySelectorAll(".segment-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
-                segControl.querySelectorAll(".segment-btn").forEach(b => b.classList.remove("active"));
-                btn.classList.add("active");
-                const chosen = btn.getAttribute("data-theme");
-                setThemeMode(chosen);
-            });
-        });
-    }
-
-    function setThemeMode(mode) {
-        state.theme = mode;
-        if (mode === "dark") {
-            document.body.classList.remove("theme-light");
-            document.body.classList.add("theme-dark");
-            Native.setStatusBarTheme(true);
-        } else if (mode === "light") {
-            document.body.classList.remove("theme-dark");
-            document.body.classList.add("theme-light");
-            Native.setStatusBarTheme(false);
-        } else {
-            // 跟随系统
-            const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-            document.body.classList.toggle("theme-dark", isDark);
-            document.body.classList.toggle("theme-light", !isDark);
-            Native.setStatusBarTheme(isDark);
-        }
     }
 
     // =========================================================================
-    // 事件监听初始化
+    // 渲染推荐卡片与分类网格
     // =========================================================================
-    function initEventListeners() {
-        // 桌面侧边栏导航点击
-        document.querySelectorAll(".desktop-sidebar .nav-item").forEach(item => {
-            item.addEventListener("click", () => {
-                const p = item.getAttribute("data-page");
-                if (p) navigateTo(p);
+    function initUIComponents() {
+        // 渲染横向滚动推荐橱窗
+        const shelf = document.getElementById("shelfMadeForYou");
+        shelf.innerHTML = "";
+        FEATURED_TRACKS.forEach(t => {
+            const card = document.createElement("div");
+            card.className = "shelf-album-card";
+            card.innerHTML = `
+                <img src="${t.cover}" class="shelf-album-cover" alt="Cover">
+                <div class="shelf-album-title">${t.title}</div>
+                <div class="shelf-album-sub">${t.artist}</div>
+            `;
+            card.addEventListener("click", () => playTrack(t));
+            shelf.appendChild(card);
+        });
+
+        // 渲染首页热门单曲列表
+        renderTracksList(FEATURED_TRACKS, document.getElementById("homeTracksList"));
+
+        // 渲染搜索分类网格
+        const catGrid = document.getElementById("browseCategoryGrid");
+        catGrid.innerHTML = "";
+        CATEGORIES.forEach(c => {
+            const card = document.createElement("div");
+            card.className = "sp-category-card";
+            card.style.backgroundColor = c.color;
+            card.innerHTML = `
+                <span>${c.name}</span>
+                <img src="${c.img}" class="cat-bg-img" alt="${c.name}">
+            `;
+            card.addEventListener("click", () => {
+                const searchIn = document.getElementById("searchInput");
+                searchIn.value = c.name;
+                onSearchChange(c.name);
             });
+            catGrid.appendChild(card);
         });
-
-        // 移动端底部 Tab 点击
-        document.querySelectorAll(".mobile-bottom-tabs .tab-item").forEach(tab => {
-            tab.addEventListener("click", () => {
-                const p = tab.getAttribute("data-page");
-                if (p) navigateTo(p);
-            });
-        });
-
-        // 侧栏"我喜欢的音乐"点击
-        document.getElementById("sidebarLikedItem").addEventListener("click", () => navigateTo("liked"));
-
-        // 历史前进后退
-        elBtnHistoryBack.addEventListener("click", goBack);
-        elBtnHistoryForward.addEventListener("click", goForward);
-        elMobileBackBtn.addEventListener("click", goBack);
-
-        // 搜索输入
-        elSidebarSearchInput.addEventListener("input", (e) => handleSearchInput(e.target.value));
-        elMobileSearchInput.addEventListener("input", (e) => {
-            const v = e.target.value;
-            elMobileClearSearch.style.display = v ? "block" : "none";
-            handleSearchInput(v);
-        });
-        elMobileClearSearch.addEventListener("click", () => {
-            elMobileSearchInput.value = "";
-            elMobileClearSearch.style.display = "none";
-            handleSearchInput("");
-        });
-
-        // 播放控制
-        elBarBtnPlayPause.addEventListener("click", togglePlay);
-        elSheetBtnPlayPause.addEventListener("click", togglePlay);
-
-        elBarBtnPrev.addEventListener("click", () => {
-            Native.toast("上一首");
-            if (DEFAULT_TRACKS.length > 0) playTrack(DEFAULT_TRACKS[1]);
-        });
-        elBarBtnNext.addEventListener("click", () => {
-            Native.toast("下一首");
-            if (DEFAULT_TRACKS.length > 0) playTrack(DEFAULT_TRACKS[2]);
-        });
-        elSheetBtnPrev.addEventListener("click", () => {
-            if (DEFAULT_TRACKS.length > 0) playTrack(DEFAULT_TRACKS[1]);
-        });
-        elSheetBtnNext.addEventListener("click", () => {
-            if (DEFAULT_TRACKS.length > 0) playTrack(DEFAULT_TRACKS[2]);
-        });
-
-        elBarBtnShuffle.addEventListener("click", () => {
-            state.shuffle = !state.shuffle;
-            elBarBtnShuffle.classList.toggle("active", state.shuffle);
-            elSheetBtnShuffle.classList.toggle("active", state.shuffle);
-            Native.toast(state.shuffle ? "随机播放开启" : "随机播放关闭");
-        });
-        elSheetBtnShuffle.addEventListener("click", () => {
-            state.shuffle = !state.shuffle;
-            elBarBtnShuffle.classList.toggle("active", state.shuffle);
-            elSheetBtnShuffle.classList.toggle("active", state.shuffle);
-            Native.toast(state.shuffle ? "随机播放开启" : "随机播放关闭");
-        });
-
-        elBarBtnRepeat.addEventListener("click", () => {
-            state.repeat = !state.repeat;
-            elBarBtnRepeat.classList.toggle("active", state.repeat);
-            elSheetBtnRepeat.classList.toggle("active", state.repeat);
-            Native.toast(state.repeat ? "单曲循环开启" : "列表循环");
-        });
-        elSheetBtnRepeat.addEventListener("click", () => {
-            state.repeat = !state.repeat;
-            elBarBtnRepeat.classList.toggle("active", state.repeat);
-            elSheetBtnRepeat.classList.toggle("active", state.repeat);
-            Native.toast(state.repeat ? "单曲循环开启" : "列表循环");
-        });
-
-        // 点赞
-        elBarBtnLike.addEventListener("click", () => toggleLikeTrack(state.currentTrack));
-        elSheetBtnLike.addEventListener("click", () => toggleLikeTrack(state.currentTrack));
-
-        // 播放条点击展开全屏 Sheet
-        elBarCoverInfoGroup.addEventListener("click", openFullscreenSheet);
-        elBarBtnExpand.addEventListener("click", openFullscreenSheet);
-        elBtnDismissSheet.addEventListener("click", dismissFullscreenSheet);
-
-        // 歌词切换 Tab
-        elBarBtnLyrics.addEventListener("click", () => {
-            openFullscreenSheet();
-            elTabLyrics.click();
-        });
-        elTabArtwork.addEventListener("click", () => {
-            elTabArtwork.classList.add("active");
-            elTabLyrics.classList.remove("active");
-            elSheetDualScaffold.classList.remove("show-lyrics");
-        });
-        elTabLyrics.addEventListener("click", () => {
-            elTabLyrics.classList.add("active");
-            elTabArtwork.classList.remove("active");
-            elSheetDualScaffold.classList.add("show-lyrics");
-        });
-
-        // 进度拖动
-        elBarScrubTrack.addEventListener("click", (e) => {
-            const rect = elBarScrubTrack.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const frac = Math.max(0, Math.min(1, clickX / rect.width));
-            const targetMs = Math.floor(frac * state.duration * 1000);
-            Native.seekAudio(targetMs);
-        });
-        elSheetScrubRail.addEventListener("click", (e) => {
-            const rect = elSheetScrubRail.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const frac = Math.max(0, Math.min(1, clickX / rect.width));
-            const targetMs = Math.floor(frac * state.duration * 1000);
-            Native.seekAudio(targetMs);
-        });
-
-        // 歌单整专播放
-        document.getElementById("btnPlayAllLiked").addEventListener("click", () => {
-            if (state.likedTracks.length > 0) playTrack(state.likedTracks[0]);
-        });
-        document.getElementById("btnPlayAllDaily").addEventListener("click", () => {
-            if (DEFAULT_TRACKS.length > 0) playTrack(DEFAULT_TRACKS[0]);
-        });
-
-        // 侧栏点击账户进入设置
-        document.getElementById("sidebarAccountRow").addEventListener("click", () => navigateTo("settings"));
-        document.getElementById("mobileAvatarBtn").addEventListener("click", () => navigateTo("settings"));
     }
 
-    // =========================================================================
-    // 原生回调接入 (MediaPlaybackService 进度与播放状态同步)
-    // =========================================================================
+    // 原生回调接入
     window.onPlaybackStateChanged = function (playing) {
         state.isPlaying = playing;
         updatePlayPauseIcons(playing);
     };
 
     window.onPlaybackProgress = function (currentMs, durationMs) {
-        updatePlaybackProgress(currentMs / 1000, durationMs / 1000);
+        updateProgress(currentMs / 1000, durationMs / 1000);
     };
 
     window.onNativeLoginSuccess = function (success) {
@@ -1113,25 +988,16 @@
             Native.toast("Spotify 登录成功，正在加载数据...");
             syncSpotifyData(true);
         } else {
-            renderLoggedOutState();
+            renderLoggedOutUI();
         }
     };
 
-    // =========================================================================
-    // 启动初始化
-    // =========================================================================
+    // 启动
     function init() {
         loadUserCache();
-        renderUserAccountUI();
-        initEventListeners();
-        initSettings();
-
-        // 默认填充首页精选与每日推荐列表
-        renderTracksList(DEFAULT_TRACKS, document.getElementById("homeTracksList"));
-        renderTracksList(DEFAULT_TRACKS, document.getElementById("dailyTracksList"));
-        renderTracksList(state.likedTracks, document.getElementById("likedTracksList"));
-
-        // 检查登录状态并同步云端数据
+        renderAccountUI();
+        initEvents();
+        initUIComponents();
         syncSpotifyData(false);
     }
 
