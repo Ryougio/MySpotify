@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="spotify_bg">#141416</color>
+    <color name="spotify_sidebar">#1C1C1F</color>
+    <color name="spotify_accent">#1ED760</color>
+    <color name="spotify_text">#F5F5F7</color>
+    <color name="spotify_muted">#8E8E93</color>
+</resources>
