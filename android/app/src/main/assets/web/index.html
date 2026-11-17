@@ -33,7 +33,7 @@
                 <div class="menu-section-header">探索</div>
                 <button class="nav-tile active" data-page="home">
                     <svg class="sf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                    <span>现在就听</span>
+                    <span>为你推荐</span>
                 </button>
                 <button class="nav-tile" data-page="daily">
                     <svg class="sf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor"/></svg>
@@ -48,7 +48,7 @@
                     <span>浏览全部</span>
                 </button>
 
-                <div class="menu-section-header">我的资料库</div>
+                <div class="menu-section-header">资料库</div>
                 <button class="nav-tile" data-page="liked">
                     <svg class="sf-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
                     <span>已点赞歌曲</span>
@@ -61,6 +61,16 @@
                     <svg class="sf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span>设置</span>
                 </button>
+
+                <div class="menu-section-header flex-header">
+                    <span>我的歌单</span>
+                    <button class="icon-tiny-btn" id="btnSyncPlaylists" title="刷新歌单">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                    </button>
+                </div>
+                <div class="user-playlists-nav" id="userPlaylistsNav">
+                    <div class="nav-empty-hint">登录 Spotify 后自动同步</div>
+                </div>
             </nav>
 
             <div class="sidebar-user-anchor">
@@ -105,7 +115,7 @@
 
             <!-- 动态滚动视口 (Content Layer) -->
             <div class="scroll-viewport" id="scrollViewport">
-                <!-- 首页 (Now Listening / Home) -->
+                <!-- 首页 (为你推荐 / Home) -->
                 <section class="apple-view active" id="viewHome">
                     <div class="large-title-block">
                         <span class="subheadline-badge">个性化推荐</span>
@@ -119,7 +129,7 @@
                     <div class="shelf-section">
                         <div class="shelf-header">
                             <h2 class="shelf-title">为你打造的精选</h2>
-                            <span class="shelf-more-link">查看全部</span>
+                            <span class="shelf-more-link" id="btnHomeViewAll">查看全部</span>
                         </div>
                         <div class="horizontal-scroll-shelf" id="dailyMixes"></div>
                     </div>
@@ -138,13 +148,12 @@
                 <!-- 搜索页 (Search) -->
                 <section class="apple-view" id="viewSearch">
                     <div class="large-title-block">
-                        <h1 class="sf-large-title">搜索</h1>
+                        <h1 class="sf-large-title">搜索结果</h1>
                     </div>
                     <div class="segmented-chips-bar">
                         <button class="chip-item active" data-filter="all">全部</button>
                         <button class="chip-item" data-filter="track">单曲</button>
                         <button class="chip-item" data-filter="playlist">歌单</button>
-                        <button class="chip-item" data-filter="artist">艺人</button>
                     </div>
                     <div class="search-results-container" id="searchResultsWrap">
                         <div class="empty-state-view">
@@ -163,7 +172,17 @@
                         <div class="hero-details">
                             <span class="subheadline-badge">专属精选</span>
                             <h1 class="hero-title">每日推荐</h1>
-                            <p class="hero-caption">每日早上 06:00 自动为你更新的最爱旋律与新歌发掘</p>
+                            <p class="hero-caption">每日早上自动为你更新的最爱旋律与新歌发掘</p>
+                            <div class="hero-action-buttons">
+                                <button class="hero-pill-action play-action" id="btnPlayAllDaily">
+                                    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                                    <span>播放</span>
+                                </button>
+                                <button class="hero-pill-action shuffle-action" id="btnShuffleDaily">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/></svg>
+                                    <span>随机播放</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="apple-track-list-card">
@@ -197,10 +216,49 @@
                             <span class="subheadline-badge">个人资料库</span>
                             <h1 class="hero-title">已点赞的歌曲</h1>
                             <p class="hero-caption" id="likedCountLabel">共 0 首歌曲</p>
+                            <div class="hero-action-buttons">
+                                <button class="hero-pill-action play-action" id="btnPlayAllLiked">
+                                    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                                    <span>播放</span>
+                                </button>
+                                <button class="hero-pill-action shuffle-action" id="btnShuffleLiked">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/></svg>
+                                    <span>随机播放</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="apple-track-list-card">
                         <div class="track-items-stack" id="likedTracksBody"></div>
+                    </div>
+                </section>
+
+                <!-- 歌单详情页 (Playlist Detail View - 完整还原桌面端) -->
+                <section class="apple-view" id="viewPlaylist">
+                    <div class="apple-hero-banner playlist-banner">
+                        <div class="hero-artwork-squircle playlist-artwork-squircle">
+                            <img src="" id="playlistCoverImg" alt="Playlist Cover">
+                        </div>
+                        <div class="hero-details">
+                            <span class="subheadline-badge" id="playlistTypeBadge">歌单</span>
+                            <h1 class="hero-title" id="playlistTitleText">歌单名称</h1>
+                            <p class="hero-caption" id="playlistMetaText">创建者 · 0 首歌曲</p>
+                            <div class="hero-action-buttons">
+                                <button class="hero-pill-action play-action" id="btnPlayAllPlaylist">
+                                    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                                    <span>播放</span>
+                                </button>
+                                <button class="hero-pill-action shuffle-action" id="btnShufflePlaylist">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/></svg>
+                                    <span>随机播放</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="apple-track-list-card">
+                        <div class="track-items-stack" id="playlistTracksBody">
+                            <div class="empty-state-view"><span class="empty-text">正在加载歌单曲目...</span></div>
+                        </div>
                     </div>
                 </section>
 
@@ -214,58 +272,169 @@
                     </div>
                 </section>
 
-                <!-- 设置 (Settings - Apple Inset Grouped Style) -->
+                <!-- 设置 (Settings - 严格对齐桌面端 ui_settings.go 的 Inset Grouped 风格) -->
                 <section class="apple-view" id="viewSettings">
                     <div class="large-title-block">
                         <h1 class="sf-large-title">设置</h1>
                     </div>
                     
                     <div class="inset-grouped-container">
-                        <div class="group-header-label">账户与同步</div>
+                        <!-- 账号 Group -->
+                        <div class="group-header-label">账号与资料库</div>
                         <div class="grouped-list">
-                            <div class="grouped-cell">
-                                <div class="cell-leading">
-                                    <div class="cell-title" id="settingsAccountName">未登录 (访客身份)</div>
-                                    <div class="cell-subtitle" id="settingsAccountDesc">登录后可同步你的 Spotify 歌单与已点赞音乐</div>
+                            <div class="grouped-cell user-profile-cell">
+                                <div class="cell-leading-profile">
+                                    <div class="profile-avatar-large" id="settingsUserAvatar">访</div>
+                                    <div class="profile-info-stack">
+                                        <div class="profile-display-name" id="settingsAccountName">未登录 (访客身份)</div>
+                                        <div class="profile-email-text" id="settingsAccountEmail">登录 Spotify 同步个人资料库</div>
+                                        <div class="profile-tier-badge" id="settingsAccountTier">免费试用</div>
+                                    </div>
                                 </div>
                                 <div class="cell-trailing">
                                     <button class="sf-capsule-action" id="btnSettingsLogin">登录</button>
                                     <button class="sf-capsule-action destructive" id="btnSettingsLogout" style="display:none;">退出登录</button>
                                 </div>
                             </div>
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">云端歌单与收藏同步</div>
+                                    <div class="cell-subtitle" id="settingsSyncStatus">未同步</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <button class="sf-capsule-action" id="btnSettingsSyncNow">立即同步</button>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="group-header-label">体验与音画</div>
+                        <!-- 体验与外观 Group -->
+                        <div class="group-header-label">外观与语言</div>
+                        <div class="grouped-list">
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">界面语言</div>
+                                    <div class="cell-subtitle">立即切换应用显示语言</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <span class="sf-badge-tint">简体中文</span>
+                                </div>
+                            </div>
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">主题外观</div>
+                                    <div class="cell-subtitle">Apple Music 深度黑色与 Liquid Glass</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <span class="sf-badge-tint">深色 (Dark)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 播放与音质 Group -->
+                        <div class="group-header-label">播放与音画</div>
+                        <div class="grouped-list">
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">音频播放音质</div>
+                                    <div class="cell-subtitle">更高音质将提供更加纯净的高频与低音细节</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <div class="mini-segmented-control">
+                                        <button class="seg-btn active" data-quality="auto">自动</button>
+                                        <button class="seg-btn" data-quality="high">极高</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">音量平衡 (ReplayGain)</div>
+                                    <div class="cell-subtitle">自动平衡不同曲目之间的音量差异，避免爆音</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <label class="apple-switch">
+                                        <input type="checkbox" id="toggleReplayGain" checked>
+                                        <span class="apple-slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">跨歌无缝淡入淡出 (Crossfade)</div>
+                                    <div class="cell-subtitle">下一曲与当前曲自然重叠过渡，无缝流淌</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <label class="apple-switch">
+                                        <input type="checkbox" id="toggleCrossfade" checked>
+                                        <span class="apple-slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 歌词与字幕 Group -->
+                        <div class="group-header-label">逐字歌词与多源引擎</div>
                         <div class="grouped-list">
                             <div class="grouped-cell">
                                 <div class="cell-leading">
                                     <div class="cell-title">智能双语逐字滚动歌词</div>
-                                    <div class="cell-subtitle">自动聚合 LRCLIB 与网易云音乐时间轴，附带中文翻译对照</div>
+                                    <div class="cell-subtitle">聚合 LRCLIB 与网易云音乐时间轴，附带中英对照</div>
                                 </div>
                                 <div class="cell-trailing">
-                                    <span class="sf-badge-tint">已启用</span>
+                                    <label class="apple-switch">
+                                        <input type="checkbox" id="toggleLyrics" checked>
+                                        <span class="apple-slider round"></span>
+                                    </label>
                                 </div>
                             </div>
                             <div class="grouped-cell">
                                 <div class="cell-leading">
-                                    <div class="cell-title">原生后台保活与系统媒体中心</div>
-                                    <div class="cell-subtitle">Android MediaSession 前台守护，支持息屏与锁屏卡片交互</div>
+                                    <div class="cell-title">歌词字号</div>
+                                    <div class="cell-subtitle">调整播放界面歌词行间距与字体显示尺寸</div>
                                 </div>
                                 <div class="cell-trailing">
-                                    <span class="sf-badge-tint">前台服务</span>
+                                    <span class="sf-badge-tint">标准</span>
                                 </div>
                             </div>
                         </div>
 
+                        <!-- 缓存与存储 Group (完全对齐 desktop a.cacheUsage 与清除) -->
+                        <div class="group-header-label">缓存与存储</div>
+                        <div class="grouped-list">
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">本地音频与封面缓存</div>
+                                    <div class="cell-subtitle" id="settingsCacheDesc">计算中...</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <button class="sf-capsule-action destructive" id="btnClearCache">清除缓存</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 系统服务 Group -->
+                        <div class="group-header-label">系统与后台保活</div>
+                        <div class="grouped-list">
+                            <div class="grouped-cell">
+                                <div class="cell-leading">
+                                    <div class="cell-title">原生后台保活与 MediaSession</div>
+                                    <div class="cell-subtitle">Android 前台服务守护，支持锁屏高清封面与手势切歌</div>
+                                </div>
+                                <div class="cell-trailing">
+                                    <span class="sf-badge-tint">已保活</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 关于 Group -->
                         <div class="group-header-label">关于</div>
                         <div class="grouped-list">
                             <div class="grouped-cell">
                                 <div class="cell-leading">
-                                    <div class="cell-title">MySpotify</div>
-                                    <div class="cell-subtitle">版本 v0.4.30 (Apple Design 重构版)</div>
+                                    <div class="cell-title">MySpotify 移动版</div>
+                                    <div class="cell-subtitle">版本 v0.4.30 (Apple Design Edition) · 由 Google DeepMind Antigravity 重构</div>
                                 </div>
                                 <div class="cell-trailing">
-                                    <button class="sf-capsule-action" id="btnClearCache">清除缓存</button>
+                                    <span class="sf-badge-tint">v0.4.30</span>
                                 </div>
                             </div>
                         </div>
@@ -313,7 +482,7 @@
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
                     </button>
 
-                    <button class="sf-icon-btn desktop-only" id="btnToggleLyrics" aria-label="Lyrics">
+                    <button class="sf-icon-btn" id="btnToggleLyrics" aria-label="Lyrics">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg>
                     </button>
                 </div>

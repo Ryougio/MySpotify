@@ -111,7 +111,97 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public void resolveAudioUrl(String title, String artist, String callbackFn) {
+        SpotifyApiClient.resolveAudioUrl(title, artist, new SpotifyApiClient.ApiCallback() {
+            @Override
+            public void onSuccess(String response) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(response);
+                    webView.evaluateJavascript(callbackFn + "(null, " + escaped + ")", null);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(error.getMessage() != null ? error.getMessage() : "Audio resolution failed");
+                    webView.evaluateJavascript(callbackFn + "(" + escaped + ", null)", null);
+                });
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void getCacheSize(String callbackFn) {
+        SpotifyApiClient.getCacheSize(activity, new SpotifyApiClient.ApiCallback() {
+            @Override
+            public void onSuccess(String response) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(response);
+                    webView.evaluateJavascript(callbackFn + "(null, " + escaped + ")", null);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(error.getMessage() != null ? error.getMessage() : "Failed to calculate cache");
+                    webView.evaluateJavascript(callbackFn + "(" + escaped + ", null)", null);
+                });
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void clearCache(String callbackFn) {
+        SpotifyApiClient.clearCache(activity, new SpotifyApiClient.ApiCallback() {
+            @Override
+            public void onSuccess(String response) {
+                activity.runOnUiThread(() -> {
+                    webView.evaluateJavascript(callbackFn + "(null, true)", null);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(error.getMessage() != null ? error.getMessage() : "Failed to clear cache");
+                    webView.evaluateJavascript(callbackFn + "(" + escaped + ", false)", null);
+                });
+            }
+        });
+    }
+
+    @JavascriptInterface
     public void playTrack(String url, String title, String artist, String album, String coverUrl) {
+        if (url == null || url.isEmpty() || url.equals("null") || url.startsWith("resolve:")) {
+            SpotifyApiClient.resolveAudioUrl(title, artist, new SpotifyApiClient.ApiCallback() {
+                @Override
+                public void onSuccess(String response) {
+                    try {
+                        JSONObject obj = new JSONObject(response);
+                        String resolvedUrl = obj.optString("audioUrl", null);
+                        if (resolvedUrl != null && !resolvedUrl.isEmpty()) {
+                            startPlayIntent(resolvedUrl, title, artist, album, coverUrl);
+                        } else {
+                            startPlayIntent("https://cdn.freesound.org/previews/612/612095_5674468-lq.mp3", title, artist, album, coverUrl);
+                        }
+                    } catch (Exception e) {
+                        startPlayIntent("https://cdn.freesound.org/previews/612/612095_5674468-lq.mp3", title, artist, album, coverUrl);
+                    }
+                }
+
+                @Override
+                public void onError(Exception error) {
+                    startPlayIntent("https://cdn.freesound.org/previews/612/612095_5674468-lq.mp3", title, artist, album, coverUrl);
+                }
+            });
+            return;
+        }
+        startPlayIntent(url, title, artist, album, coverUrl);
+    }
+
+    private void startPlayIntent(String url, String title, String artist, String album, String coverUrl) {
         Intent intent = new Intent(activity, MediaPlaybackService.class);
         intent.setAction(MediaPlaybackService.ACTION_PLAY);
         intent.putExtra("url", url);

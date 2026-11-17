@@ -117,6 +117,104 @@ public class SpotifyApiClient {
     }
 
     /**
+     * Resolves playable full audio stream URL using NetEase Cloud Music search index
+     * when Spotify's preview_url is not provided or null.
+     */
+    public static void resolveAudioUrl(String title, String artist, ApiCallback callback) {
+        executor.execute(() -> {
+            try {
+                String query = title + (artist != null && !artist.isEmpty() ? " " + artist.split(",")[0].trim() : "");
+                URL searchUrl = new URL("https://music.163.com/api/cloudsearch/pc?type=1&s=" + URLEncoder.encode(query, "UTF-8") + "&limit=1");
+                HttpURLConnection conn = (HttpURLConnection) searchUrl.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("User-Agent", USER_AGENT);
+                conn.setConnectTimeout(6000);
+                conn.setReadTimeout(6000);
+
+                if (conn.getResponseCode() == 200) {
+                    String body = readStream(conn.getInputStream());
+                    JSONObject res = new JSONObject(body);
+                    JSONArray songs = res.optJSONObject("result") != null ? res.getJSONObject("result").optJSONArray("songs") : null;
+                    if (songs != null && songs.length() > 0) {
+                        long songId = songs.getJSONObject(0).getLong("id");
+                        String audioUrl = "https://music.163.com/song/media/outer/url?id=" + songId + ".mp3";
+                        JSONObject out = new JSONObject();
+                        out.put("audioUrl", audioUrl);
+                        out.put("songId", songId);
+                        mainHandler.post(() -> callback.onSuccess(out.toString()));
+                        conn.disconnect();
+                        return;
+                    }
+                }
+                conn.disconnect();
+                mainHandler.post(() -> callback.onError(new Exception("No matching audio stream found")));
+            } catch (Exception e) {
+                mainHandler.post(() -> callback.onError(e));
+            }
+        });
+    }
+
+    public static void getCacheSize(Context context, ApiCallback callback) {
+        executor.execute(() -> {
+            try {
+                long size = getDirSize(context.getCacheDir());
+                String formatted = formatFileSize(size);
+                JSONObject out = new JSONObject();
+                out.put("bytes", size);
+                out.put("formatted", formatted);
+                mainHandler.post(() -> callback.onSuccess(out.toString()));
+            } catch (Exception e) {
+                mainHandler.post(() -> callback.onError(e));
+            }
+        });
+    }
+
+    public static void clearCache(Context context, ApiCallback callback) {
+        executor.execute(() -> {
+            try {
+                deleteDir(context.getCacheDir());
+                mainHandler.post(() -> callback.onSuccess("{\"cleared\":true}"));
+            } catch (Exception e) {
+                mainHandler.post(() -> callback.onError(e));
+            }
+        });
+    }
+
+    private static long getDirSize(java.io.File dir) {
+        long size = 0;
+        if (dir != null && dir.isDirectory()) {
+            java.io.File[] files = dir.listFiles();
+            if (files != null) {
+                for (java.io.File f : files) {
+                    if (f.isDirectory()) size += getDirSize(f);
+                    else size += f.length();
+                }
+            }
+        }
+        return size;
+    }
+
+    private static boolean deleteDir(java.io.File dir) {
+        if (dir != null && dir.isDirectory()) {
+            java.io.File[] files = dir.listFiles();
+            if (files != null) {
+                for (java.io.File f : files) {
+                    if (f.isDirectory()) deleteDir(f);
+                    else f.delete();
+                }
+            }
+        }
+        return dir != null && dir.delete();
+    }
+
+    private static String formatFileSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        int exp = (int) (Math.log(bytes) / Math.log(1024));
+        char pre = "KMGTPE".charAt(exp - 1);
+        return String.format(java.util.Locale.US, "%.1f %sB", bytes / Math.pow(1024, exp), pre);
+    }
+
+    /**
      * Multi-source lyrics engine:
      * 1. LRCLIB (Accurate metadata match)
      * 2. NetEase Cloud Music (LRC with translated Chinese subtitle)
