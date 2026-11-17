@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
@@ -13,17 +12,32 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements MediaPlaybackService.PlaybackEventListener {
 
     private WebView webView;
     private WebAppInterface webAppInterface;
+    private ActivityResultLauncher<Intent> loginLauncher;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Register login launcher
+        loginLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == RESULT_OK) {
+                        if (webView != null) {
+                            webView.evaluateJavascript("if (window.onNativeLoginSuccess) window.onNativeLoginSuccess(true);", null);
+                        }
+                    }
+                }
+        );
 
         // Configure full dark theme immersive status bar & navigation bar
         Window window = getWindow();
@@ -44,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowContentAccess(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " MySpotifyDesktopAndroid/0.4.29");
+        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.29");
 
         webAppInterface = new WebAppInterface(this, webView);
         webView.addJavascriptInterface(webAppInterface, "AndroidBridge");
@@ -65,6 +79,53 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setBackgroundColor(Color.parseColor("#141416"));
         webView.loadUrl("file:///android_asset/web/index.html");
+
+        MediaPlaybackService.setEventListener(this);
+    }
+
+    public void launchSpotifyLogin() {
+        Intent intent = new Intent(this, SpotifyLoginActivity.class);
+        loginLauncher.launch(intent);
+    }
+
+    @Override
+    public void onPlaybackStateChanged(boolean isPlaying, int currentPositionMs, int durationMs) {
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        String.format("if (window.onNativePlaybackStateChanged) window.onNativePlaybackStateChanged(%b, %d, %d);",
+                                isPlaying, currentPositionMs, durationMs),
+                        null
+                );
+            }
+        });
+    }
+
+    @Override
+    public void onTrackEnded() {
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript("if (window.onNativeTrackEnded) window.onNativeTrackEnded();", null);
+            }
+        });
+    }
+
+    @Override
+    public void onNextRequested() {
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript("if (window.onNativeNextRequested) window.onNativeNextRequested();", null);
+            }
+        });
+    }
+
+    @Override
+    public void onPrevRequested() {
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript("if (window.onNativePrevRequested) window.onNativePrevRequested();", null);
+            }
+        });
     }
 
     @Override
@@ -83,9 +144,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        MediaPlaybackService.setEventListener(null);
         if (webAppInterface != null) {
             webAppInterface.cleanup();
         }
+        super.onDestroy();
     }
 }

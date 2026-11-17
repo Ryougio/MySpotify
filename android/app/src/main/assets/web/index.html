@@ -2,13 +2,13 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>MySpotify</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="theme-dark">
     <div id="app" class="app-layout">
-        <!-- 桌面端侧边栏 (Sidebar: 232px) -->
+        <!-- 侧边栏 (Sidebar: 232px) -->
         <aside class="app-sidebar" id="appSidebar">
             <div class="sidebar-header">
                 <div class="app-brand">
@@ -51,15 +51,18 @@
                     <span class="nav-label">最近播放</span>
                 </button>
                 <button class="nav-item" data-page="settings">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="3"/></svg>
                     <span class="nav-label">设置</span>
                 </button>
             </nav>
 
             <div class="sidebar-footer">
-                <div class="user-pill">
-                    <div class="user-avatar">M</div>
-                    <span class="user-name">访客模式</span>
+                <div class="user-pill" id="userPill">
+                    <div class="user-avatar" id="sidebarAvatar">访</div>
+                    <div class="user-info-text">
+                        <span class="user-name" id="sidebarUserName">访客模式</span>
+                        <span class="user-sub" id="sidebarUserSub">点击登录账号</span>
+                    </div>
                 </div>
             </div>
         </aside>
@@ -69,7 +72,7 @@
             <!-- 顶部导航栏 (Page Top Header) -->
             <header class="app-header">
                 <div class="header-left">
-                    <button class="icon-btn mobile-menu-btn" id="mobileMenuBtn">
+                    <button class="icon-btn mobile-menu-btn" id="mobileMenuBtn" aria-label="Menu">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                     </button>
                     <div class="history-controls">
@@ -95,12 +98,12 @@
             <div class="page-content" id="pageContent">
                 <!-- 首页视图 (Home) -->
                 <section class="view-page view-home active" id="viewHome">
-                    <h1 class="page-title">早上好</h1>
+                    <h1 class="page-title" id="homeGreeting">早上好</h1>
                     
-                    <!-- 快捷访问网格 -->
+                    <!-- 快捷访问网格 (6个卡片) -->
                     <div class="quick-access-grid" id="quickGrid"></div>
 
-                    <!-- 每日推荐 -->
+                    <!-- 每日精选轮播 -->
                     <div class="content-section">
                         <div class="section-header">
                             <h2 class="section-title">为你打造的每日精选</h2>
@@ -143,45 +146,143 @@
                     </div>
                 </section>
 
+                <!-- 每日推荐视图 (Daily) -->
+                <section class="view-page view-daily" id="viewDaily">
+                    <div class="playlist-header">
+                        <div class="playlist-cover-wrap">
+                            <img src="https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=400&q=80" class="playlist-cover" alt="Daily Mix">
+                        </div>
+                        <div class="playlist-meta">
+                            <span class="playlist-type">个性化歌单</span>
+                            <h1 class="playlist-title">每日推荐</h1>
+                            <p class="playlist-desc">基于你的听歌历史与偏好定制，每日 06:00 自动更新</p>
+                        </div>
+                    </div>
+                    <div class="track-table-wrap">
+                        <table class="track-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 48px;">#</th>
+                                    <th>标题</th>
+                                    <th>专辑</th>
+                                    <th style="text-align: right; width: 80px;">时长</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dailyTracksBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
                 <!-- 排行榜视图 (Charts) -->
                 <section class="view-page view-charts" id="viewCharts">
                     <h1 class="page-title">全球与地区榜单</h1>
                     <div class="charts-grid" id="chartsGrid"></div>
                 </section>
 
+                <!-- 浏览全部视图 (Browse) -->
+                <section class="view-page view-browse" id="viewBrowse">
+                    <h1 class="page-title">浏览全部分类</h1>
+                    <div class="browse-categories-grid" id="browseGrid"></div>
+                </section>
+
+                <!-- 已点赞歌曲 (Liked) -->
+                <section class="view-page view-liked" id="viewLiked">
+                    <div class="playlist-header liked-header">
+                        <div class="playlist-cover-wrap liked-cover-gradient">
+                            <svg viewBox="0 0 24 24" fill="white" width="64" height="64"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                        </div>
+                        <div class="playlist-meta">
+                            <span class="playlist-type">播放列表</span>
+                            <h1 class="playlist-title">已点赞的歌曲</h1>
+                            <p class="playlist-desc" id="likedCountLabel">共 0 首歌曲</p>
+                        </div>
+                    </div>
+                    <div class="track-table-wrap">
+                        <table class="track-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 48px;">#</th>
+                                    <th>标题</th>
+                                    <th>专辑</th>
+                                    <th style="text-align: right; width: 80px;">时长</th>
+                                </tr>
+                            </thead>
+                            <tbody id="likedTracksBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- 最近播放视图 (Recent) -->
+                <section class="view-page view-recent" id="viewRecent">
+                    <h1 class="page-title">最近播放记录</h1>
+                    <div class="track-table-wrap">
+                        <table class="track-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 48px;">#</th>
+                                    <th>标题</th>
+                                    <th>专辑</th>
+                                    <th style="text-align: right; width: 80px;">时长</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentTracksBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
                 <!-- 设置视图 (Settings) -->
                 <section class="view-page view-settings" id="viewSettings">
                     <h1 class="page-title">设置</h1>
+                    
                     <div class="settings-group">
-                        <h3 class="settings-group-title">外观与主题</h3>
+                        <h3 class="settings-group-title">当前账号</h3>
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-name">深色模式</div>
-                                <div class="setting-desc">保持与桌面端一致的极简纯黑质感</div>
+                                <div class="setting-name" id="settingsAccountName">未登录 (访客身份)</div>
+                                <div class="setting-desc" id="settingsAccountDesc">登录后可同步你的 Spotify 歌单与已点赞音乐</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="action-btn-sm" id="btnSettingsLogin">登录</button>
+                                <button class="action-btn-sm danger" id="btnSettingsLogout" style="display:none;">退出登录</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-group">
+                        <h3 class="settings-group-title">歌词解析</h3>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-name">智能多源歌词</div>
+                                <div class="setting-desc">Spotify 原生歌词缺失时，自动对齐网易云音乐与 LRCLIB 同步逐字滚动歌词与中文翻译</div>
                             </div>
                             <div class="setting-control">
                                 <span class="tag-status">已启用</span>
                             </div>
                         </div>
                     </div>
+
                     <div class="settings-group">
-                        <h3 class="settings-group-title">歌词解析</h3>
+                        <h3 class="settings-group-title">音频播放</h3>
                         <div class="setting-item">
                             <div class="setting-info">
-                                <div class="setting-name">智能多源歌词</div>
-                                <div class="setting-desc">Spotify 原生歌词缺失时，自动对齐网易云音乐与 LRCLIB 同步滚动歌词</div>
+                                <div class="setting-name">后台保活与锁屏卡片</div>
+                                <div class="setting-desc">使用 Android 原生 MediaSession 前台服务，支持息屏与锁屏控制</div>
                             </div>
                             <div class="setting-control">
-                                <span class="tag-status">智能推荐中</span>
+                                <span class="tag-status">原生接管</span>
                             </div>
                         </div>
                     </div>
+
                     <div class="settings-group">
                         <h3 class="settings-group-title">关于</h3>
                         <div class="setting-item">
                             <div class="setting-info">
                                 <div class="setting-name">MySpotify for Android</div>
-                                <div class="setting-desc">版本 v0.4.29 (桌面级核心架构重构版)</div>
+                                <div class="setting-desc">版本 v0.4.29 (桌面级架构重构版)</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="action-btn-sm" id="btnClearCache">清除缓存</button>
                             </div>
                         </div>
                     </div>
@@ -262,7 +363,7 @@
             <div class="dynamic-backdrop" id="dynamicBackdrop"></div>
             
             <div class="np-header">
-                <button class="circle-btn" id="btnCloseNowPlaying">
+                <button class="circle-btn" id="btnCloseNowPlaying" aria-label="收起">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
                 <div class="np-header-title">正在播放</div>
@@ -270,10 +371,13 @@
             </div>
 
             <div class="np-content-layout">
-                <!-- 左列：大尺寸封面与信息 -->
+                <!-- 左列：黑胶唱片与信息 -->
                 <div class="np-left-column">
-                    <div class="vinyl-art-frame">
-                        <img src="" class="np-large-cover" id="npLargeCover" alt="Album Cover">
+                    <div class="vinyl-art-frame" id="vinylArtFrame">
+                        <div class="vinyl-disc" id="vinylDisc">
+                            <div class="vinyl-grooves"></div>
+                            <img src="" class="np-large-cover" id="npLargeCover" alt="Album Cover">
+                        </div>
                     </div>
                     <div class="np-track-details">
                         <h2 class="np-song-name" id="npSongName">歌曲名</h2>
@@ -285,16 +389,13 @@
                 <div class="np-right-column">
                     <div class="lyrics-scroll-container" id="lyricsContainer">
                         <div class="lyrics-lines-wrapper" id="lyricsWrapper">
-                            <div class="lyric-line-placeholder">暂无滚动歌词</div>
+                            <div class="lyric-line-placeholder">正在加载歌词...</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- 音频底层播放器 -->
-    <audio id="audioPlayer" preload="auto"></audio>
 
     <script src="app.js"></script>
 </body>
