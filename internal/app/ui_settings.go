@@ -101,6 +101,10 @@ func (a *app) settingsPage(c *ui.Context) {
 			})
 		}
 
+		if deskHere {
+			a.deskSettings(c, group, row)
+		}
+
 		group(l10n.T("外观"), func() {
 			row(l10n.T("语言"), l10n.T("立即切换界面语言"), func() {
 				labels := []string{l10n.T("跟随系统"), "简体中文", "English", "Italiano"}
@@ -155,6 +159,9 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(l10n.T("全局快捷键"), func() {
 			for _, act := range hotkeyActions {
+				if act.id == "desk" && !deskHere {
+					continue
+				}
 				desc := ""
 				if a.hotkeyErr[act.id] {
 					desc = l10n.T("被占用了，换一个")
