@@ -9,6 +9,9 @@ on:
       - '.github/workflows/build-android-apk.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     name: Build Android APK
@@ -56,10 +59,28 @@ jobs:
           name: build-log
           path: build.log
 
-      - name: Upload Android APK
+      - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         if: success()
         with:
           name: MySpotify-Android-Debug-APK
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish Direct APK Release
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: mobile-v0.4.30
+          name: "MySpotify Mobile Edition (Apple Design v0.4.30)"
+          body: |
+            ### MySpotify Android 客户端 (Apple Design 重构版)
+            - 完整还原桌面端 Apple Music 美学与交互（毛玻璃 Liquid Glass、流动 Aura Mesh、逐字双语呼吸歌词）
+            - 修复 Spotify 云端个人歌单、已点赞歌曲与账号资料同步
+            - 全域事件代理彻底解决搜索与歌单歌曲点击播放失效问题
+            - 集成多源音频流解析引擎，无预览音轨曲目自动流式加载
+            - 完整对齐桌面端设置页（音质选择、音量平衡、缓存动态计算与一键清空、前台保活）
+          files: android/app/build/outputs/apk/debug/*.apk
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
