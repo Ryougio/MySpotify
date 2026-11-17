@@ -7,26 +7,24 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="spotify-app">
-    <!-- 主界面布局容器 -->
     <div id="app" class="spotify-viewport">
 
         <!-- 页面滚动内容区 -->
         <main class="spotify-main-scroll" id="mainScroll">
 
             <!-- ========================================================
-                 1. 首页 (Home Tab)
+                 1. 首页 (Home Tab - 为你推荐)
                  ======================================================== -->
             <section class="sp-tab-view active" id="viewHome">
-                <!-- 顶部问候栏与快捷过滤 -->
                 <header class="sp-home-header">
                     <div class="header-user-row">
                         <div class="sp-user-avatar-btn" id="homeAvatarBtn">
                             <span class="user-avatar-text" id="homeAvatarLetter">S</span>
                         </div>
-                        <div class="sp-filter-chips">
-                            <button class="sp-chip active" data-filter="all">全部</button>
-                            <button class="sp-chip" data-filter="music">音乐</button>
-                            <button class="sp-chip" data-filter="podcast">播客</button>
+                        <div class="sp-filter-chips" id="homeFilterChips">
+                            <button class="sp-chip active" data-facet="">全部</button>
+                            <button class="sp-chip" data-facet="music-chip">音乐</button>
+                            <button class="sp-chip" data-facet="podcasts-chip">播客</button>
                         </div>
                         <div class="sp-header-actions">
                             <button class="sp-icon-btn" id="btnOpenSettings" title="设置">
@@ -37,47 +35,47 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- 桌面端核心频道直达条：每日推荐 / 排行榜 / 最近播放 / 浏览 -->
+                    <div class="sp-quick-nav-row">
+                        <button class="sp-quick-nav-pill" id="btnNavDaily">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                                <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                            </svg>
+                            <span>每日推荐</span>
+                        </button>
+                        <button class="sp-quick-nav-pill" id="btnNavCharts">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                                <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+                            </svg>
+                            <span>排行榜</span>
+                        </button>
+                        <button class="sp-quick-nav-pill" id="btnNavRecent">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                            <span>最近播放</span>
+                        </button>
+                        <button class="sp-quick-nav-pill" id="btnNavBrowse">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                            </svg>
+                            <span>浏览</span>
+                        </button>
+                    </div>
                 </header>
 
-                <!-- Spotify 经典 2列x3行 最近播放快捷卡片网格 -->
-                <div class="sp-recents-grid" id="homeRecentsGrid">
-                    <!-- 1. 我喜欢的音乐 -->
-                    <div class="sp-recent-card" id="cardLikedSongs">
-                        <div class="recent-cover-box liked-gradient">
-                            <svg viewBox="0 0 24 24" fill="white" width="20" height="20">
-                                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                            </svg>
-                        </div>
-                        <span class="recent-title">已点赞的歌曲</span>
-                    </div>
+                <!-- 顶部问候语 + 快捷卡片网格 (由 Spotify HomeFeed 动态填充) -->
+                <div class="sp-recents-grid" id="homeRecentsGrid"></div>
 
-                    <!-- 2. 每日推荐 -->
-                    <div class="sp-recent-card" id="cardDailyMix">
-                        <div class="recent-cover-box daily-gradient">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" width="20" height="20">
-                                <circle cx="12" cy="12" r="10"/>
-                                <polygon points="10 8 16 12 10 16 10 8" fill="white"/>
-                            </svg>
-                        </div>
-                        <span class="recent-title">每日推荐</span>
-                    </div>
+                <!-- 动态推荐橱窗容器 (推荐电台 / 收录你喜爱歌曲的专辑 / 热门歌单 / 播客等) -->
+                <div id="homeDynamicSections">
+                    <div class="sp-loading-box" id="homeLoadingBox">正在加载 Spotify 为你推荐...</div>
                 </div>
-
-                <!-- 横向滚动推荐橱窗 1：为你打造 -->
-                <section class="sp-shelf-section">
-                    <h2 class="sp-shelf-title">为你打造</h2>
-                    <div class="sp-shelf-scroll" id="shelfMadeForYou"></div>
-                </section>
-
-                <!-- 热门单曲榜 -->
-                <section class="sp-shelf-section">
-                    <h2 class="sp-shelf-title">今日热门歌曲</h2>
-                    <div class="sp-tracks-list" id="homeTracksList"></div>
-                </section>
             </section>
 
             <!-- ========================================================
-                 2. 搜索页 (Search Tab)
+                 2. 搜索页 (Search Tab - 浏览全部 + 分类搜索结果)
                  ======================================================== -->
             <section class="sp-tab-view" id="viewSearch">
                 <header class="sp-search-header">
@@ -88,31 +86,47 @@
                         <h1 class="sp-page-title">搜索</h1>
                     </div>
 
-                    <!-- 醒目的 Spotify 白色搜索框胶囊 -->
                     <div class="sp-search-bar" id="searchBarWrap">
                         <svg class="search-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
                             <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
                         </svg>
-                        <input type="text" id="searchInput" placeholder="想听什么？" autocomplete="off">
+                        <input type="text" id="searchInput" placeholder="想听什么？搜索艺人、歌曲、专辑..." autocomplete="off">
                         <button class="clear-search-btn" id="btnClearSearch" style="display:none;">&times;</button>
                     </div>
                 </header>
 
-                <!-- 搜索状态区域：默认显示分类探索网格，输入时显示曲目结果 -->
                 <div class="sp-search-content" id="searchContent">
-                    <!-- 默认：浏览全部探索网格 (彩色卡片) -->
+                    <!-- 默认：浏览全部探索网格 (真实 Spotify browseAll 分类) -->
                     <div class="sp-browse-all-section" id="browseAllSection">
                         <h2 class="sp-shelf-title">浏览全部</h2>
-                        <div class="sp-category-grid" id="browseCategoryGrid"></div>
+                        <div class="sp-category-grid" id="browseCategoryGrid">
+                            <div class="sp-loading-box">正在加载分类...</div>
+                        </div>
                     </div>
 
-                    <!-- 搜索结果列表 -->
+                    <!-- 搜索结果区域 (同步桌面端：艺人头像 -> 专辑 -> 歌单 -> 歌曲) -->
                     <div class="sp-search-results" id="searchResultsSection" style="display:none;">
-                        <div class="sp-filter-chips search-chips">
-                            <button class="sp-chip active" data-search-type="tracks">歌曲</button>
-                            <button class="sp-chip" data-search-type="playlists">播放列表</button>
-                        </div>
-                        <div class="sp-tracks-list" id="searchResultsList"></div>
+                        <div id="searchLoadingHint" class="sp-loading-box" style="display:none;">正在搜索 Spotify 曲库...</div>
+
+                        <section class="sp-search-block" id="searchArtistsBlock" style="display:none;">
+                            <h2 class="sp-shelf-title">艺人</h2>
+                            <div class="sp-shelf-scroll" id="searchArtistsList"></div>
+                        </section>
+
+                        <section class="sp-search-block" id="searchAlbumsBlock" style="display:none;">
+                            <h2 class="sp-shelf-title">专辑</h2>
+                            <div class="sp-shelf-scroll" id="searchAlbumsList"></div>
+                        </section>
+
+                        <section class="sp-search-block" id="searchPlaylistsBlock" style="display:none;">
+                            <h2 class="sp-shelf-title">歌单</h2>
+                            <div class="sp-shelf-scroll" id="searchPlaylistsList"></div>
+                        </section>
+
+                        <section class="sp-search-block" id="searchTracksBlock" style="display:none;">
+                            <h2 class="sp-shelf-title">歌曲</h2>
+                            <div class="sp-tracks-list" id="searchTracksList"></div>
+                        </section>
                     </div>
                 </div>
             </section>
@@ -138,28 +152,27 @@
                         </div>
                     </div>
 
-                    <!-- 过滤标签行 -->
-                    <div class="sp-filter-chips">
-                        <button class="sp-chip active">播放列表</button>
-                        <button class="sp-chip">专辑</button>
-                        <button class="sp-chip">艺人</button>
+                    <!-- 音乐库分类过滤标签 (全部 / 播放列表 / 专辑 / 艺人) -->
+                    <div class="sp-filter-chips" id="libFilterChips">
+                        <button class="sp-chip active" data-lib-filter="all">全部</button>
+                        <button class="sp-chip" data-lib-filter="playlists">播放列表</button>
+                        <button class="sp-chip" data-lib-filter="albums">专辑</button>
+                        <button class="sp-chip" data-lib-filter="artists">艺人</button>
                     </div>
 
-                    <!-- 排序与布局指示 -->
                     <div class="library-sub-bar">
-                        <div class="library-sort-label">
+                        <div class="library-sort-label" id="libSummaryLabel">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <polyline points="7 15 12 20 17 15"/>
                                 <polyline points="7 9 12 4 17 9"/>
                             </svg>
-                            <span>最近播放</span>
+                            <span>我的收藏</span>
                         </div>
                     </div>
                 </header>
 
-                <!-- 资料库播放列表容器 -->
                 <div class="sp-library-items-list" id="libraryItemsList">
-                    <!-- 第一项固定为：已点赞的歌曲 -->
+                    <!-- 固定项：已点赞的歌曲 -->
                     <div class="sp-library-row" id="libRowLiked">
                         <div class="lib-cover-box liked-gradient">
                             <svg viewBox="0 0 24 24" fill="white" width="24" height="24">
@@ -167,19 +180,17 @@
                             </svg>
                         </div>
                         <div class="lib-meta-col">
-                            <span class="lib-row-title">已点赞的歌曲</span>
-                            <span class="lib-row-sub" id="libLikedCountText">📌 播放列表 · 0 首歌曲</span>
+                            <span class="lib-row-title">我喜欢的音乐</span>
+                            <span class="lib-row-sub" id="libLikedCountText">📌 歌单 · 0 首歌曲</span>
                         </div>
                     </div>
 
-                    <div id="libraryPlaylistsContainer">
-                        <!-- 动态渲染 Spotify 同步歌单 -->
-                    </div>
+                    <div id="libraryPlaylistsContainer"></div>
                 </div>
             </section>
 
             <!-- ========================================================
-                 4. 歌单详情页 (Playlist Detail Page)
+                 4. 歌单 / 专辑 / 播客详情页 (Playlist / Album Detail Page)
                  ======================================================== -->
             <section class="sp-tab-view" id="viewPlaylist">
                 <header class="sp-detail-nav">
@@ -199,6 +210,7 @@
                     <h1 class="hero-playlist-name" id="playlistHeroName">歌单名称</h1>
                     <div class="hero-playlist-meta" id="playlistHeroMeta">Spotify · 0 首歌曲</div>
                     <div class="hero-action-cluster">
+                        <button class="sp-outline-btn" id="btnPlaylistSave" style="display:none;">收藏</button>
                         <button class="hero-big-play-btn" id="btnPlayAllInHero">
                             <svg viewBox="0 0 24 24" fill="black" width="28" height="28">
                                 <polygon points="6 4 20 12 6 20 6 4"/>
@@ -211,7 +223,130 @@
             </section>
 
             <!-- ========================================================
-                 5. 设置页 (Settings View - Spotify 原版黑金风格)
+                 5. 艺人主页 (Artist Profile Page - 关注 / 热门歌曲 / 专辑 / 相关艺人)
+                 ======================================================== -->
+            <section class="sp-tab-view" id="viewArtist">
+                <header class="sp-detail-nav">
+                    <button class="sp-icon-btn" id="btnArtistBack">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="22" height="22">
+                            <path d="m15 18-6-6 6-6"/>
+                        </svg>
+                    </button>
+                    <span class="sp-detail-nav-title" id="artistNavTitle">艺人</span>
+                    <div style="width:24px;"></div>
+                </header>
+
+                <div class="artist-hero-section" id="artistHeroSection">
+                    <div class="artist-hero-backdrop" id="artistHeroBackdrop"></div>
+                    <div class="artist-hero-content">
+                        <img src="" id="artistHeroAvatar" class="artist-hero-avatar" alt="Artist">
+                        <div class="artist-verified-badge" id="artistVerifiedBadge" style="display:none;">
+                            <svg viewBox="0 0 24 24" fill="#3d91f4" width="16" height="16">
+                                <path d="M12 2L14.4 4.1L17.6 3.8L18.4 6.9L21.2 8.5L20.1 11.5L21.2 14.5L18.4 16.1L17.6 19.2L14.4 18.9L12 21L9.6 18.9L6.4 19.2L5.6 16.1L2.8 14.5L3.9 11.5L2.8 8.5L5.6 6.9L6.4 3.8L9.6 4.1L12 2Z"/>
+                                <path d="M9.5 12L11.2 13.7L14.8 10.1" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span>认证艺人</span>
+                        </div>
+                        <h1 class="artist-hero-name" id="artistHeroName">艺人名称</h1>
+                        <p class="artist-hero-stats" id="artistHeroStats">正在加载艺人资料...</p>
+                    </div>
+                </div>
+
+                <div class="artist-action-bar">
+                    <button class="sp-follow-btn" id="btnArtistFollow">关注</button>
+                    <button class="hero-big-play-btn" id="btnArtistPlayTop">
+                        <svg viewBox="0 0 24 24" fill="black" width="26" height="26">
+                            <polygon points="6 4 20 12 6 20 6 4"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <section class="sp-shelf-section" id="artistTopTracksSec">
+                    <h2 class="sp-shelf-title">热门歌曲</h2>
+                    <div class="sp-tracks-list" id="artistTopTracksList"></div>
+                </section>
+
+                <section class="sp-shelf-section" id="artistAlbumsSec" style="display:none;">
+                    <h2 class="sp-shelf-title">热门专辑与单曲</h2>
+                    <div class="sp-shelf-scroll" id="artistAlbumsList"></div>
+                </section>
+
+                <section class="sp-shelf-section" id="artistRelatedSec" style="display:none;">
+                    <h2 class="sp-shelf-title">粉丝也喜欢</h2>
+                    <div class="sp-shelf-scroll" id="artistRelatedList"></div>
+                </section>
+            </section>
+
+            <!-- ========================================================
+                 6. 分类探索页 (Category Browse Page - 推荐歌单)
+                 ======================================================== -->
+            <section class="sp-tab-view" id="viewCategory">
+                <header class="sp-detail-nav" id="categoryNavBar">
+                    <button class="sp-icon-btn" id="btnCategoryBack">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="22" height="22">
+                            <path d="m15 18-6-6 6-6"/>
+                        </svg>
+                    </button>
+                    <span class="sp-detail-nav-title" id="categoryNavTitle">分类浏览</span>
+                    <div style="width:24px;"></div>
+                </header>
+
+                <div class="category-hero-banner" id="categoryHeroBanner">
+                    <h1 class="category-hero-title" id="categoryHeroTitle">浏览</h1>
+                </div>
+
+                <div id="categoryShelvesContainer">
+                    <div class="sp-loading-box">正在加载精选歌单...</div>
+                </div>
+            </section>
+
+            <!-- ========================================================
+                 7. 排行榜页 (Charts Page - Spotify 官方榜单)
+                 ======================================================== -->
+            <section class="sp-tab-view" id="viewCharts">
+                <header class="sp-detail-nav">
+                    <button class="sp-icon-btn" id="btnChartsBack">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="22" height="22">
+                            <path d="m15 18-6-6 6-6"/>
+                        </svg>
+                    </button>
+                    <span class="sp-detail-nav-title">排行榜</span>
+                    <div style="width:24px;"></div>
+                </header>
+
+                <div class="charts-page-content">
+                    <p class="charts-sub-header">Spotify 官方榜单</p>
+                    <h1 class="sp-page-title" style="padding: 0 16px 12px;">排行榜</h1>
+                    <div id="chartsFeaturedList" class="charts-featured-list">
+                        <div class="sp-loading-box">正在获取全球与地区排行榜...</div>
+                    </div>
+
+                    <h2 class="sp-shelf-title" id="chartsRegionalTitle" style="display:none; margin-top: 20px;">全部榜单</h2>
+                    <div id="chartsRegionalGrid" class="charts-regional-grid"></div>
+                </div>
+            </section>
+
+            <!-- ========================================================
+                 8. 最近播放页 (Recently Played Page)
+                 ======================================================== -->
+            <section class="sp-tab-view" id="viewRecent">
+                <header class="sp-detail-nav">
+                    <button class="sp-icon-btn" id="btnRecentBack">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="22" height="22">
+                            <path d="m15 18-6-6 6-6"/>
+                        </svg>
+                    </button>
+                    <span class="sp-detail-nav-title">最近播放</span>
+                    <div style="width:24px;"></div>
+                </header>
+
+                <div id="recentContentWrap">
+                    <div class="sp-loading-box">正在获取最近播放记录...</div>
+                </div>
+            </section>
+
+            <!-- ========================================================
+                 9. 设置页 (Settings View)
                  ======================================================== -->
             <section class="sp-tab-view" id="viewSettings">
                 <header class="sp-detail-nav">
@@ -225,7 +360,6 @@
                 </header>
 
                 <div class="settings-content-wrap">
-                    <!-- 用户档案卡片 -->
                     <div class="settings-profile-card">
                         <div class="settings-avatar-circle" id="settingsUserAvatar">
                             <span class="avatar-letter">S</span>
@@ -237,7 +371,6 @@
                         </div>
                     </div>
 
-                    <!-- 账号与登录管理 -->
                     <div class="settings-group">
                         <h3 class="settings-group-title">账号</h3>
                         <div class="settings-row" id="rowLogin">
@@ -248,7 +381,7 @@
                             </div>
                         </div>
                         <div class="settings-row" id="rowSync" style="display:none;">
-                            <span class="settings-row-label">同步云端歌单</span>
+                            <span class="settings-row-label">同步云端全部歌单与音乐库</span>
                             <button class="sp-outline-btn" id="btnActionSync">立即同步</button>
                         </div>
                         <div class="settings-row" id="rowLogout" style="display:none;">
@@ -257,7 +390,6 @@
                         </div>
                     </div>
 
-                    <!-- 网络代理配置 (解决地区受限) -->
                     <div class="settings-group">
                         <h3 class="settings-group-title">网络与代理</h3>
                         <div class="settings-row vertical">
@@ -270,7 +402,6 @@
                         </div>
                     </div>
 
-                    <!-- 音质与播放设置 -->
                     <div class="settings-group">
                         <h3 class="settings-group-title">播放与音质</h3>
                         <div class="settings-row">
@@ -289,7 +420,6 @@
                         </div>
                     </div>
 
-                    <!-- 存储与缓存 -->
                     <div class="settings-group">
                         <h3 class="settings-group-title">存储空间</h3>
                         <div class="settings-row">
@@ -301,13 +431,12 @@
                         </div>
                     </div>
 
-                    <!-- 关于 -->
                     <div class="settings-group">
                         <h3 class="settings-group-title">关于</h3>
                         <div class="settings-row">
                             <div class="settings-col">
                                 <span class="settings-row-label">MySpotify Mobile</span>
-                                <p class="settings-row-desc">版本 9.1.98 (Android 原版复刻架构)</p>
+                                <p class="settings-row-desc">版本 v0.4.34 (桌面全功能 + Spotify 原版架构)</p>
                             </div>
                             <a href="https://github.com/Ryougio/MySpotify" target="_blank" class="sp-link-green">GitHub</a>
                         </div>
@@ -317,7 +446,7 @@
         </main>
 
         <!-- ========================================================
-             6. 浮动迷你播放栏 (Spotify Floating Mini-Player Bar)
+             浮动迷你播放栏 (Floating Mini-Player Bar)
              ======================================================== -->
         <div class="sp-mini-player" id="miniPlayerBar">
             <div class="mini-player-body">
@@ -341,14 +470,13 @@
                     </svg>
                 </button>
             </div>
-            <!-- 迷你播放条底部的细进度线 -->
             <div class="mini-progress-track">
                 <div class="mini-progress-fill" id="miniProgressFill"></div>
             </div>
         </div>
 
         <!-- ========================================================
-             7. Spotify 底部导航栏 (Bottom Navigation Bar - 3大主Tab)
+             底部导航栏 (3大主Tab)
              ======================================================== -->
         <nav class="sp-bottom-nav" id="bottomNav">
             <button class="nav-tab active" data-tab="home">
@@ -373,13 +501,11 @@
         </nav>
 
         <!-- ========================================================
-             8. 全屏正在播放视图 (Spotify Activity Now Playing)
+             全屏正在播放视图 (Activity Now Playing)
              ======================================================== -->
         <div class="sp-now-playing-fullscreen" id="npFullscreen">
-            <!-- 动态封面自适应色彩背景 -->
             <div class="np-gradient-bg" id="npGradientBg"></div>
 
-            <!-- 顶部工具条 -->
             <header class="np-top-bar">
                 <button class="np-icon-btn" id="btnDismissNp">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="24" height="24">
@@ -387,7 +513,7 @@
                     </svg>
                 </button>
                 <div class="np-playlist-indicator">
-                    <span class="np-indicator-label">PLAYING FROM PLAYLIST</span>
+                    <span class="np-indicator-label">PLAYING FROM</span>
                     <span class="np-indicator-title" id="npPlayingFrom">为你推荐</span>
                 </div>
                 <button class="np-icon-btn" id="btnNpMenu">
@@ -397,13 +523,11 @@
                 </button>
             </header>
 
-            <!-- 核心交互区 (封面或全屏歌词) -->
             <div class="np-main-body" id="npMainBody">
                 <div class="np-artwork-container" id="npArtworkWrap">
                     <img src="" id="npLargeCoverImg" class="np-artwork" alt="Album Cover">
                 </div>
 
-                <!-- 歌曲标题与点赞 -->
                 <div class="np-track-meta-row">
                     <div class="np-titles">
                         <h1 class="np-title-text" id="npTrackTitle">未在播放</h1>
@@ -416,10 +540,13 @@
                     </button>
                 </div>
 
-                <!-- 进度条轨道 -->
+                <!-- 触控优化的可拖拽进度条轨道 -->
                 <div class="np-scrubber-module">
-                    <div class="np-scrubber-rail" id="npScrubRail">
-                        <div class="np-scrubber-fill" id="npScrubFill"></div>
+                    <div class="np-scrubber-touch-area" id="npScrubWrap">
+                        <div class="np-scrubber-rail" id="npScrubRail">
+                            <div class="np-scrubber-fill" id="npScrubFill"></div>
+                            <div class="np-scrubber-thumb" id="npScrubThumb"></div>
+                        </div>
                     </div>
                     <div class="np-timestamps">
                         <span id="npTimeCurrent">0:00</span>
@@ -427,7 +554,6 @@
                     </div>
                 </div>
 
-                <!-- 经典 Spotify 5键控制集群 -->
                 <div class="np-controls-cluster">
                     <button class="np-control-btn" id="npBtnShuffle" title="随机播放">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
@@ -460,7 +586,6 @@
                     </button>
                 </div>
 
-                <!-- 底部辅助工具栏 -->
                 <div class="np-footer-bar">
                     <button class="np-footer-btn" id="npBtnDevices">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
@@ -476,7 +601,6 @@
                     </button>
                 </div>
 
-                <!-- Spotify 原版标志性 歌词卡片 (LYRICS Card) -->
                 <div class="np-lyrics-card" id="npLyricsCard">
                     <div class="lyrics-card-header">
                         <span class="lyrics-card-badge">歌词</span>

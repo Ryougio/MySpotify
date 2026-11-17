@@ -213,6 +213,7 @@ public class SpotifyApiClient {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("User-Agent", USER_AGENT);
                 conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
                 conn.setRequestProperty("Content-Type", "application/json;charset=UTF-8");
                 conn.setRequestProperty("app-platform", "WebPlayer");
                 if (token != null && !token.isEmpty()) {
@@ -234,6 +235,40 @@ public class SpotifyApiClient {
                     mainHandler.post(() -> callback.onSuccess(res));
                 } else {
                     mainHandler.post(() -> callback.onError(new Exception("Pathfinder " + code + ": " + res)));
+                }
+                conn.disconnect();
+            } catch (Exception e) {
+                mainHandler.post(() -> callback.onError(e));
+            }
+        });
+    }
+
+    /**
+     * Executes a GET request against spclient.wg.spotify.com (e.g. recently-played).
+     */
+    public static void fetchSpClient(String path, String token, ApiCallback callback) {
+        executor.execute(() -> {
+            try {
+                URL url = new URL("https://spclient.wg.spotify.com" + path);
+                HttpURLConnection conn = openConnection(url);
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("User-Agent", USER_AGENT);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+                conn.setRequestProperty("app-platform", "WebPlayer");
+                if (token != null && !token.isEmpty()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + token);
+                }
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+
+                int code = conn.getResponseCode();
+                InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+                String res = readStream(is);
+                if (code >= 200 && code < 300) {
+                    mainHandler.post(() -> callback.onSuccess(res));
+                } else {
+                    mainHandler.post(() -> callback.onError(new Exception("spclient " + code + ": " + res)));
                 }
                 conn.disconnect();
             } catch (Exception e) {

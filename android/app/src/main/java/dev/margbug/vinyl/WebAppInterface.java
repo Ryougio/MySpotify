@@ -145,6 +145,27 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public void fetchSpClient(String path, String token, String callbackFn) {
+        SpotifyApiClient.fetchSpClient(path, token, new SpotifyApiClient.ApiCallback() {
+            @Override
+            public void onSuccess(String response) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(response);
+                    webView.evaluateJavascript(callbackFn + "(null, " + escaped + ")", null);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                activity.runOnUiThread(() -> {
+                    String escaped = JSONObject.quote(error.getMessage() != null ? error.getMessage() : "spclient failed");
+                    webView.evaluateJavascript(callbackFn + "(" + escaped + ", null)", null);
+                });
+            }
+        });
+    }
+
+    @JavascriptInterface
     public void fetchLyrics(String trackId, String title, String artist, long durationSec, String callbackFn) {
         SpotifyApiClient.fetchLyrics(trackId, title, artist, durationSec, new SpotifyApiClient.ApiCallback() {
             @Override

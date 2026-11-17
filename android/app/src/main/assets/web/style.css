@@ -1197,3 +1197,345 @@ html, body {
     font-size: 22px;
     margin: 8px 0;
 }
+
+
+/* ==========================================================================
+   v0.4.34 全面升级样式：可拖拽进度条 / 艺人主页 / 排行榜 / 分类探索 / 桌面端直达条
+   ========================================================================== */
+
+/* 可触控拖拽的 Scrubber 区域与圆点滑块 */
+.np-scrubber-touch-area {
+    padding: 14px 0;
+    margin: -10px 0 -4px 0;
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.np-scrubber-rail {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 2px;
+    position: relative;
+}
+.np-scrubber-touch-area.dragging .np-scrubber-rail {
+    height: 6px;
+}
+.np-scrubber-fill {
+    height: 100%;
+    width: 0%;
+    background: #ffffff;
+    border-radius: 2px;
+    position: relative;
+}
+.np-scrubber-touch-area.dragging .np-scrubber-fill {
+    background: var(--sp-green);
+}
+.np-scrubber-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ffffff;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    transition: transform 0.1s ease, background 0.1s ease;
+    pointer-events: none;
+}
+.np-scrubber-touch-area.dragging .np-scrubber-thumb {
+    transform: translate(-50%, -50%) scale(1.45);
+    background: var(--sp-green);
+}
+
+/* 主页快捷导航条（每日推荐 / 排行榜 / 最近播放 / 浏览） */
+.sp-quick-nav-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 10px 0 4px 0;
+    scrollbar-width: none;
+}
+.sp-quick-nav-row::-webkit-scrollbar {
+    display: none;
+}
+.sp-quick-nav-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 13px;
+    background: #242424;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+.sp-quick-nav-pill:active {
+    background: #383838;
+    transform: scale(0.96);
+}
+.sp-quick-nav-pill svg {
+    color: var(--sp-green);
+}
+
+/* 加载占位 */
+.sp-loading-box {
+    padding: 36px 20px;
+    text-align: center;
+    color: var(--sp-text-subdued);
+    font-size: 14px;
+}
+
+/* 搜索分段区块 */
+.sp-search-block {
+    margin-bottom: 22px;
+}
+
+/* 圆形艺人卡片 (用于搜索页、主页推荐、相关艺人) */
+.sp-artist-card {
+    width: 120px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: transform 0.12s ease;
+}
+.sp-artist-card:active {
+    transform: scale(0.96);
+}
+.sp-artist-avatar {
+    width: 112px;
+    height: 112px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #282828;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+.sp-artist-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #ffffff;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sp-artist-tag {
+    font-size: 11px;
+    color: var(--sp-text-subdued);
+    margin-top: -4px;
+}
+
+/* 音乐库中的圆形艺人头像 */
+.lib-cover-img.round {
+    border-radius: 50%;
+}
+
+/* ==========================================================================
+   艺人主页 (Artist Profile Page)
+   ========================================================================== */
+.artist-hero-section {
+    position: relative;
+    padding: 20px 16px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    overflow: hidden;
+}
+.artist-hero-backdrop {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, #2b3a4a 0%, #121212 100%);
+    background-size: cover;
+    background-position: center;
+    filter: blur(24px) brightness(0.45);
+    transform: scale(1.15);
+    z-index: 0;
+}
+.artist-hero-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+.artist-hero-avatar {
+    width: 148px;
+    height: 148px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #282828;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+    margin-bottom: 6px;
+}
+.artist-verified-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+.artist-hero-name {
+    font-size: 28px;
+    font-weight: 900;
+    color: #ffffff;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+}
+.artist-hero-stats {
+    font-size: 13px;
+    color: var(--sp-text-subdued);
+}
+
+.artist-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px 16px;
+}
+.sp-follow-btn {
+    padding: 8px 22px;
+    border-radius: 999px;
+    border: 1.5px solid #888888;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.sp-follow-btn.following {
+    border-color: var(--sp-green);
+    color: var(--sp-green);
+    background: rgba(30, 215, 96, 0.1);
+}
+.sp-follow-btn:active {
+    transform: scale(0.95);
+}
+
+/* ==========================================================================
+   分类详情页 (Category Browse Detail)
+   ========================================================================== */
+.category-hero-banner {
+    padding: 28px 16px 24px;
+    background: linear-gradient(180deg, #4b2369 0%, #121212 100%);
+    margin-bottom: 12px;
+}
+.category-hero-title {
+    font-size: 30px;
+    font-weight: 900;
+    color: #ffffff;
+}
+
+/* ==========================================================================
+   排行榜页 (Charts Page)
+   ========================================================================== */
+.charts-page-content {
+    padding-bottom: 24px;
+}
+.charts-sub-header {
+    padding: 8px 16px 2px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--sp-green);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.charts-featured-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 16px;
+}
+.chart-feature-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #1e1e1e;
+    border-radius: 10px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.chart-feature-card:active {
+    background: #2c2c2c;
+}
+.chart-feature-cover {
+    width: 78px;
+    height: 78px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #282828;
+}
+.chart-feature-info {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.chart-feature-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #ffffff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.chart-feature-sub {
+    font-size: 12px;
+    color: var(--sp-text-subdued);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.charts-regional-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    padding: 0 16px;
+}
+.chart-grid-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    cursor: pointer;
+}
+.chart-grid-card:active {
+    opacity: 0.8;
+}
+.chart-grid-cover {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #282828;
+}
+.chart-grid-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffffff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.chart-grid-sub {
+    font-size: 12px;
+    color: var(--sp-text-subdued);
+    margin-top: -4px;
+}

@@ -75,13 +75,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.33
-          name: "MySpotify Mobile Edition (v0.4.33 - Google Login Fix & Cookie Login)"
+          tag_name: mobile-v0.4.34
+          name: "MySpotify Mobile Edition (v0.4.34 - Full Desktop API Parity & UX Overhaul)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.33 更新)
-            - **Google 登录兼容性优化**：优化 WebView 请求头与 User-Agent，剔除 `; wv` 与 `Version/4.0` 标识，避免 Google 拦截，并支持 OAuth 弹窗。
-            - **新增手动 Cookie (sp_dc) 登录通道**：登录页面与设置页面均新增「Cookie 登录」，支持直接粘贴 `sp_dc` 秒速登录，彻底告别网页安全拦截。
-            - **官方原版暗黑美学 (#121212)**：3-Tab 底部导航、浮动迷你播放条、沉浸式全屏播放器与双语逐行滚动歌词。
+            ### MySpotify Android 客户端 (v0.4.34 重磅功能完整版)
+            - **1. Android 系统返回栈**：全面支持返回键与侧滑返回逐级退回（收起歌词 → 收起播放页 → 返回上一级页面 → 回到首页 → 双击退出），不再直接退回桌面。
+            - **2. 丝滑可拖拽进度条 + 真实队列上下曲**：支持移动端 Touch 拖拽与精准点按进度条，拖拽期间防原生回调跳动，新增真实播放队列上下曲切换。
+            - **3. 首页与音乐库过滤全部实装**：首页「全部 / 音乐 / 播客」真实对接 Spotify `home` (`facet`) 接口；音乐库「全部 / 播放列表 / 专辑 / 艺人」完整解析并支持点击进入详情。
+            - **4. 多维度搜索 + 艺人主页关注 + 分类推荐歌单**：搜索同步桌面端展示圆形艺人头像、专辑、歌单与歌曲；点击艺人进入专属艺人主页（支持「关注 / 已关注」、热门歌曲、发行专辑、相关艺人）；浏览全部改用真实 `browseAll` / `browsePage` 展示对应流派精选歌单。
+            - **5. 桌面端核心频道完整移植**：彻底移除硬编码占位歌曲，首页接入真实 Spotify 为你推荐，并完整实现「每日推荐」、「Spotify 官方排行榜（全球/台湾/香港/日本/韩国等）」、「最近播放」、「浏览」全部页面。
+            - **6. 全量分页同步**：`libraryV3`、`fetchLibraryTracks`（我喜欢的音乐）、`fetchPlaylist`、`getAlbum` 全部启用完整自动分页拉取，彻底解决歌单与喜欢歌曲同步不全问题。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:

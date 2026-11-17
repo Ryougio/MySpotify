@@ -3,7 +3,6 @@ package dev.margbug.vinyl;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.graphics.Color;
-import android.os.Build;
 import android.os.Bundle;
 import android.view.Window;
 import android.view.WindowManager;
@@ -12,6 +11,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -21,6 +22,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
     private WebView webView;
     private WebAppInterface webAppInterface;
     private ActivityResultLauncher<Intent> loginLauncher;
+    private long lastBackPressTime = 0;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -59,7 +61,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         settings.setAllowContentAccess(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.29");
+        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.34");
 
         webAppInterface = new WebAppInterface(this, webView);
         webView.addJavascriptInterface(webAppInterface, "AndroidBridge");
@@ -78,8 +80,30 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
             }
         });
 
-        webView.setBackgroundColor(Color.parseColor("#141416"));
+        webView.setBackgroundColor(Color.parseColor("#121212"));
         webView.loadUrl("file:///android_asset/web/index.html");
+
+        // Modern Android back-navigation handling (supports Android 13/14/15 predictive back & gestures)
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (webView == null) {
+                    moveTaskToBack(true);
+                    return;
+                }
+                webView.evaluateJavascript("window.handleAndroidBack ? window.handleAndroidBack() : false", value -> {
+                    if (!"true".equals(value)) {
+                        long now = System.currentTimeMillis();
+                        if (now - lastBackPressTime < 2000) {
+                            moveTaskToBack(true);
+                        } else {
+                            lastBackPressTime = now;
+                            Toast.makeText(MainActivity.this, "再按一次返回桌面", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+            }
+        });
 
         MediaPlaybackService.setEventListener(this);
     }
@@ -125,20 +149,6 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         runOnUiThread(() -> {
             if (webView != null) {
                 webView.evaluateJavascript("if (window.onNativePrevRequested) window.onNativePrevRequested();", null);
-            }
-        });
-    }
-
-    @Override
-    public void onBackPressed() {
-        // Allow Web UI to handle navigation backwards first (e.g. exit Now Playing)
-        webView.evaluateJavascript("window.handleAndroidBack ? window.handleAndroidBack() : false", value -> {
-            if (!"true".equals(value)) {
-                if (webView.canGoBack()) {
-                    webView.goBack();
-                } else {
-                    MainActivity.super.onBackPressed();
-                }
             }
         });
     }
