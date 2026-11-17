@@ -7,6 +7,8 @@ import android.os.Looper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -14,9 +16,11 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -29,29 +33,138 @@ public class SpotifyApiClient {
     private static final ExecutorService executor = Executors.newCachedThreadPool();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    private static final String[][] TOTP_SECRETS = {
+            {",7/*F(\"rLJ2oxaKL^f+E1xvP@N", "61"},
+            {"OmE{ZA.J^\":0FG\\Uz?[@WW", "60"},
+            {"{iOFn;4}<1PFYKPV?5{%u14]M>/V0hDH", "59"}
+    };
+
+    private static Context appContext;
+
+    public static void init(Context context) {
+        if (context != null) {
+            appContext = context.getApplicationContext();
+        }
+    }
+
+    public static HttpURLConnection openConnection(URL url) throws Exception {
+        if (appContext != null) {
+            SharedPreferences prefs = appContext.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+            String proxyStr = prefs.getString("proxy", null);
+            if (proxyStr != null && !proxyStr.trim().isEmpty()) {
+                String clean = proxyStr.trim().replace("http://", "").replace("https://", "");
+                String[] parts = clean.split(":");
+                if (parts.length == 2) {
+                    try {
+                        String host = parts[0];
+                        int port = Integer.parseInt(parts[1]);
+                        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP, new java.net.InetSocketAddress(host, port));
+                        return (HttpURLConnection) url.openConnection(proxy);
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+        return (HttpURLConnection) url.openConnection();
+    }
+
     public interface ApiCallback {
         void onSuccess(String response);
         void onError(Exception error);
     }
 
+    private static byte[] unmaskTotpSecret(String masked) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < masked.length(); i++) {
+            char c = masked.charAt(i);
+            sb.append(((int) c) ^ ((i % 33) + 9));
+        }
+        return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String computeTotp(byte[] key, long timeMs) {
+        try {
+            long counter = timeMs / 1000 / 30;
+            ByteBuffer buffer = ByteBuffer.allocate(8);
+            buffer.putLong(counter);
+            byte[] counterBytes = buffer.array();
+
+            Mac mac = Mac.getInstance("HmacSHA1");
+            mac.init(new SecretKeySpec(key, "HmacSHA1"));
+            byte[] hash = mac.doFinal(counterBytes);
+
+            int offset = hash[hash.length - 1] & 0x0f;
+            int binary = ((hash[offset] & 0x7f) << 24) |
+                    ((hash[offset + 1] & 0xff) << 16) |
+                    ((hash[offset + 2] & 0xff) << 8) |
+                    (hash[offset + 3] & 0xff);
+            int code = binary % 1000000;
+            return String.format(Locale.US, "%06d", code);
+        } catch (Exception e) {
+            return "000000";
+        }
+    }
+
+    private static long getServerTime() {
+        try {
+            URL url = new URL("https://open.spotify.com/api/server-time");
+            HttpURLConnection conn = openConnection(url);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", USER_AGENT);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            if (conn.getResponseCode() == 200) {
+                String body = readStream(conn.getInputStream());
+                JSONObject json = new JSONObject(body);
+                long sec = json.optLong("serverTime", 0);
+                if (sec > 0) return sec * 1000;
+            }
+            conn.disconnect();
+        } catch (Exception ignored) {}
+        return System.currentTimeMillis();
+    }
+
     /**
-     * Obtains an Access Token from Spotify Web Player.
-     * Uses saved sp_dc cookie if present, otherwise returns anonymous guest token.
+     * Obtains an Access Token from Spotify Web Player using the official TOTP signature
+     * exactly like the desktop Go client.
      */
     public static void getAccessToken(Context context, ApiCallback callback) {
         executor.execute(() -> {
             try {
                 SharedPreferences prefs = context.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
                 String spDc = prefs.getString(SpotifyLoginActivity.KEY_SP_DC, null);
+                String savedCookies = prefs.getString(SpotifyLoginActivity.KEY_ALL_COOKIES, null);
 
-                URL url = new URL("https://open.spotify.com/get_access_token?reason=transport&productType=web-player");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                long nowMs = System.currentTimeMillis();
+                long serverTimeMs = getServerTime();
+
+                byte[] key = unmaskTotpSecret(TOTP_SECRETS[0][0]);
+                int version = Integer.parseInt(TOTP_SECRETS[0][1]);
+                String totpNow = computeTotp(key, nowMs);
+                String totpServer = computeTotp(key, serverTimeMs);
+
+                String query = "reason=init&productType=web_player" +
+                        "&totp=" + totpNow +
+                        "&totpServer=" + totpServer +
+                        "&totpVer=" + version;
+
+                URL url = new URL("https://open.spotify.com/api/token?" + query);
+                HttpURLConnection conn = openConnection(url);
                 conn.setRequestMethod("GET");
                 conn.setRequestProperty("User-Agent", USER_AGENT);
+                conn.setRequestProperty("Referer", "https://open.spotify.com/");
                 conn.setRequestProperty("Accept", "application/json");
 
-                if (spDc != null && !spDc.isEmpty()) {
-                    conn.setRequestProperty("Cookie", "sp_dc=" + spDc);
+                StringBuilder cookieHeader = new StringBuilder();
+                if (savedCookies != null && !savedCookies.isEmpty()) {
+                    cookieHeader.append(savedCookies);
+                }
+                if (spDc != null && !spDc.isEmpty() && !cookieHeader.toString().contains("sp_dc=")) {
+                    if (cookieHeader.length() > 0) cookieHeader.append("; ");
+                    cookieHeader.append("sp_dc=").append(spDc);
+                }
+
+                if (cookieHeader.length() > 0) {
+                    conn.setRequestProperty("Cookie", cookieHeader.toString());
                 }
 
                 conn.setConnectTimeout(10000);
@@ -60,6 +173,13 @@ public class SpotifyApiClient {
                 int code = conn.getResponseCode();
                 if (code >= 200 && code < 300) {
                     String body = readStream(conn.getInputStream());
+                    try {
+                        JSONObject json = new JSONObject(body);
+                        String token = json.optString("accessToken", null);
+                        if (token != null && !token.isEmpty()) {
+                            prefs.edit().putString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, token).apply();
+                        }
+                    } catch (Exception ignored) {}
                     mainHandler.post(() -> callback.onSuccess(body));
                 } else {
                     String err = readStream(conn.getErrorStream());
@@ -73,32 +193,38 @@ public class SpotifyApiClient {
     }
 
     /**
-     * Proxies a request to the official Spotify Web API with the given Bearer token.
+     * Executes a Pathfinder GraphQL query against Spotify Web Player endpoints.
      */
-    public static void fetchWebApi(String path, String token, String method, String body, ApiCallback callback) {
+    public static void fetchPathfinder(String operationName, String hash, JSONObject variables, String token, ApiCallback callback) {
         executor.execute(() -> {
             try {
-                String fullUrl = path.startsWith("http") ? path : "https://api.spotify.com/v1/" + (path.startsWith("/") ? path.substring(1) : path);
-                URL url = new URL(fullUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod(method);
+                JSONObject payload = new JSONObject();
+                payload.put("operationName", operationName);
+                payload.put("variables", variables != null ? variables : new JSONObject());
+                JSONObject ext = new JSONObject();
+                JSONObject persisted = new JSONObject();
+                persisted.put("version", 1);
+                persisted.put("sha256Hash", hash);
+                ext.put("persistedQuery", persisted);
+                payload.put("extensions", ext);
+
+                URL url = new URL("https://api-partner.spotify.com/pathfinder/v2/query");
+                HttpURLConnection conn = openConnection(url);
+                conn.setRequestMethod("POST");
                 conn.setRequestProperty("User-Agent", USER_AGENT);
                 conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json;charset=UTF-8");
+                conn.setRequestProperty("app-platform", "WebPlayer");
                 if (token != null && !token.isEmpty()) {
                     conn.setRequestProperty("Authorization", "Bearer " + token);
                 }
 
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(15000);
+                conn.setDoOutput(true);
 
-                if ("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)) {
-                    conn.setDoOutput(true);
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    if (body != null && !body.isEmpty()) {
-                        try (OutputStream os = conn.getOutputStream()) {
-                            os.write(body.getBytes(StandardCharsets.UTF_8));
-                        }
-                    }
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
                 }
 
                 int code = conn.getResponseCode();
@@ -107,7 +233,7 @@ public class SpotifyApiClient {
                 if (code >= 200 && code < 300) {
                     mainHandler.post(() -> callback.onSuccess(res));
                 } else {
-                    mainHandler.post(() -> callback.onError(new Exception("HTTP " + code + ": " + res)));
+                    mainHandler.post(() -> callback.onError(new Exception("Pathfinder " + code + ": " + res)));
                 }
                 conn.disconnect();
             } catch (Exception e) {
@@ -211,32 +337,27 @@ public class SpotifyApiClient {
         if (bytes < 1024) return bytes + " B";
         int exp = (int) (Math.log(bytes) / Math.log(1024));
         char pre = "KMGTPE".charAt(exp - 1);
-        return String.format(java.util.Locale.US, "%.1f %sB", bytes / Math.pow(1024, exp), pre);
+        return String.format(Locale.US, "%.1f %sB", bytes / Math.pow(1024, exp), pre);
     }
 
     /**
-     * Multi-source lyrics engine:
-     * 1. LRCLIB (Accurate metadata match)
-     * 2. NetEase Cloud Music (LRC with translated Chinese subtitle)
+     * Multi-source lyrics engine: LRCLIB + NetEase
      */
     public static void fetchLyrics(String trackId, String title, String artist, long durationSec, ApiCallback callback) {
         executor.execute(() -> {
             try {
-                // 1. Try LRCLIB
                 String lrcJson = queryLrclib(title, artist, durationSec);
                 if (lrcJson != null) {
                     mainHandler.post(() -> callback.onSuccess(lrcJson));
                     return;
                 }
 
-                // 2. Try NetEase Cloud Music
                 String neteaseJson = queryNetEase(title, artist);
                 if (neteaseJson != null) {
                     mainHandler.post(() -> callback.onSuccess(neteaseJson));
                     return;
                 }
 
-                // Empty fallback
                 mainHandler.post(() -> callback.onSuccess("[]"));
             } catch (Exception e) {
                 mainHandler.post(() -> callback.onError(e));
@@ -333,7 +454,6 @@ public class SpotifyApiClient {
                 obj.put("time", line.timeSec);
                 obj.put("text", line.text);
 
-                // Find matching translation line within 0.5s tolerance
                 String trans = null;
                 for (LyricLine t : transLines) {
                     if (Math.abs(t.timeSec - line.timeSec) < 0.5) {

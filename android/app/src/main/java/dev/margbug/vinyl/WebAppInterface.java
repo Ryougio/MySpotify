@@ -28,11 +28,33 @@ public class WebAppInterface {
     @JavascriptInterface
     public void logout() {
         SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().remove(SpotifyLoginActivity.KEY_SP_DC).apply();
+        prefs.edit()
+                .remove(SpotifyLoginActivity.KEY_SP_DC)
+                .remove(SpotifyLoginActivity.KEY_ALL_COOKIES)
+                .remove(SpotifyLoginActivity.KEY_ACCESS_TOKEN)
+                .apply();
         activity.runOnUiThread(() -> {
             showToast("已退出登录，恢复访客模式");
             webView.evaluateJavascript("if (window.onNativeLoginSuccess) window.onNativeLoginSuccess(false);", null);
         });
+    }
+
+    @JavascriptInterface
+    public String getSavedAccessToken() {
+        SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, "");
+    }
+
+    @JavascriptInterface
+    public void setProxy(String proxy) {
+        SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().putString("proxy", proxy != null ? proxy.trim() : "").apply();
+    }
+
+    @JavascriptInterface
+    public String getProxy() {
+        SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getString("proxy", "");
     }
 
     @JavascriptInterface
@@ -69,24 +91,32 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
-    public void fetchWebApi(String path, String token, String method, String body, String callbackFn) {
-        SpotifyApiClient.fetchWebApi(path, token, method, body, new SpotifyApiClient.ApiCallback() {
-            @Override
-            public void onSuccess(String response) {
-                activity.runOnUiThread(() -> {
-                    String escaped = JSONObject.quote(response);
-                    webView.evaluateJavascript(callbackFn + "(null, " + escaped + ")", null);
-                });
-            }
+    public void fetchPathfinder(String operationName, String hash, String variablesJson, String token, String callbackFn) {
+        try {
+            JSONObject vars = (variablesJson != null && !variablesJson.isEmpty()) ? new JSONObject(variablesJson) : new JSONObject();
+            SpotifyApiClient.fetchPathfinder(operationName, hash, vars, token, new SpotifyApiClient.ApiCallback() {
+                @Override
+                public void onSuccess(String response) {
+                    activity.runOnUiThread(() -> {
+                        String escaped = JSONObject.quote(response);
+                        webView.evaluateJavascript(callbackFn + "(null, " + escaped + ")", null);
+                    });
+                }
 
-            @Override
-            public void onError(Exception error) {
-                activity.runOnUiThread(() -> {
-                    String escaped = JSONObject.quote(error.getMessage() != null ? error.getMessage() : "Request failed");
-                    webView.evaluateJavascript(callbackFn + "(" + escaped + ", null)", null);
-                });
-            }
-        });
+                @Override
+                public void onError(Exception error) {
+                    activity.runOnUiThread(() -> {
+                        String escaped = JSONObject.quote(error.getMessage() != null ? error.getMessage() : "Pathfinder failed");
+                        webView.evaluateJavascript(callbackFn + "(" + escaped + ", null)", null);
+                    });
+                }
+            });
+        } catch (Exception e) {
+            activity.runOnUiThread(() -> {
+                String escaped = JSONObject.quote(e.getMessage() != null ? e.getMessage() : "Variables parse failed");
+                webView.evaluateJavascript(callbackFn + "(" + escaped + ", null)", null);
+            });
+        }
     }
 
     @JavascriptInterface
@@ -214,6 +244,27 @@ public class WebAppInterface {
         } else {
             activity.startService(intent);
         }
+    }
+
+    @JavascriptInterface
+    public void setStatusBarTheme(boolean dark) {
+        activity.runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.view.Window window = activity.getWindow();
+                android.view.View decor = window.getDecorView();
+                int flags = decor.getSystemUiVisibility();
+                if (dark) {
+                    flags &= ~android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    window.setStatusBarColor(android.graphics.Color.parseColor("#141416"));
+                    window.setNavigationBarColor(android.graphics.Color.parseColor("#141416"));
+                } else {
+                    flags |= android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    window.setStatusBarColor(android.graphics.Color.parseColor("#f5f5f7"));
+                    window.setNavigationBarColor(android.graphics.Color.parseColor("#ffffff"));
+                }
+                decor.setSystemUiVisibility(flags);
+            }
+        });
     }
 
     @JavascriptInterface

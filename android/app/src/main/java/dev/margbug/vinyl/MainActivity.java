@@ -26,6 +26,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        SpotifyApiClient.init(this);
 
         // Register login launcher
         loginLauncher = registerForActivityResult(
