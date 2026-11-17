@@ -42,8 +42,9 @@ jobs:
         run: |
           cd android
           gradle assembleDebug --stacktrace --no-daemon > ../build.log 2>&1 || {
-            ERR_SNIP=$(tail -n 25 ../build.log | tr '\r\n' ' ' | head -c 1200)
-            echo "::error title=GradleBuildFailure::$ERR_SNIP"
+            echo "::error title=FirstError::$(grep -m 1 -E 'error:|FAILED|Exception' ../build.log | tr -d '\r\n')"
+            echo "::error title=Cause::$(grep -m 1 -A 2 'Caused by:' ../build.log | tr '\r\n' ' ')"
+            echo "::error title=WhatWentWrong::$(grep -m 1 -A 2 'What went wrong:' ../build.log | tr '\r\n' ' ')"
             cat ../build.log
             exit 1
           }
