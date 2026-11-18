@@ -551,7 +551,7 @@ public class SpotifyApiClient {
                         .header("Accept", "application/json")
                         .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                         .header("app-platform", "WebPlayer")
-                        .post(RequestBody.create(payload.toString(), JSON_MEDIA));
+                        .post(RequestBody.create(payload.toString().getBytes(StandardCharsets.UTF_8), JSON_MEDIA));
 
                 if (token != null && !token.isEmpty()) {
                     rb.header("Authorization", "Bearer " + token);

@@ -75,12 +75,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.48
-          name: "MySpotify Mobile Edition (v0.4.48 - Fix Widevine Encrypted Segment Decryption via Native Security Level)"
+          tag_name: mobile-v0.4.50
+          name: "MySpotify Mobile Edition (v0.4.50 - Fix Spotify client-token 400 & Widevine Full-Track Playback)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.48 修复加密分段 10 秒后静音/拖动无声)
-            - **定位根因**：实机抓取 `C2SoftAacDec` + Spotify MP4 盒结构发现，Spotify 歌曲前 10 秒（Seg 1）是未加密 Clear Lead，10 秒后（Seg 2+ 及拖动进度条后的位置）为 Widevine `cenc` 加密段；此前强制降级为 `securityLevel = L3` 在 Android 17 / 三星硬件 Widevine L1 环境下导致解密后 AAC 帧报错 `0x4004` 被替换静音。
-            - **修复**：移除强制 `L3` 限制，直接使用设备原生 Widevine 硬件安全级别（L1），并禁用未持密钥先播清晰段，同时补充完整 Media3 `AnalyticsListener` DRM 诊断日志。
+            ### MySpotify Android 客户端 (v0.4.50 彻底修复 10 秒后静音与拖动进度条无声)
+            - **定位根因**：`SpotifyApiClient` 请求 `https://clienttoken.spotify.com/v1/clienttoken` 时，OkHttp `RequestBody.create(String, MediaType)` 自动附加了 `Content-Type: application/json; charset=utf-8`，导致 Spotify 服务端返回 `HTTP 400 Bad Request`、`client-token` 始终为空；缺失 `client-token` 时 Spotify Widevine `/audio/license` 仍返回 200 但下发无效密钥，导致前 10 秒明文 Clear Lead 正常、第 10 秒起加密分段及拖动进度条后 AAC 解码持续报 `0x4004 / 0x0005` 并静音。
+            - **核心修复**：改用纯 `application/json` 字节流提交 `clienttoken` 请求并在 `getIdentitySync` 中保证自动补全 `client-token`，同时清理临时调试代码。
+            - **真机验证**：Samsung SM-S9110 实测多首完整曲目与任意拖动（15s / 45s / 69s / 106s / 117s），`clienttoken HTTP 200` + `hasClientToken=true`，`C2SoftAacDec` 零报错、全程清晰有声。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
