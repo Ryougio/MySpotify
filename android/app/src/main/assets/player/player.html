@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>MySpotify Widevine Player</title>
-<script src="/hls.min.js"></script>
+<script>/*__HLS_JS_INLINE__*/</script>
 <script>
 // Android WebView Widevine EME + HLS.js Audio Engine
 // Ported from upstream internal/player/web/player.html (margbug01/MySpotify)
@@ -411,7 +411,8 @@
     }
   };
 
-  console.log('[VinylPlayer] ready, isSecureContext=' + window.isSecureContext + ', Hls.isSupported=' + (typeof Hls !== 'undefined' && Hls.isSupported()));
-  send(0, 'ready', 0, 'secure=' + window.isSecureContext);
+  const hlsOk = (typeof Hls !== 'undefined' && Hls.isSupported());
+  console.log('[VinylPlayer] ready, isSecureContext=' + window.isSecureContext + ', Hls.isSupported=' + hlsOk);
+  send(0, 'ready', 0, 'secure=' + window.isSecureContext + ',hls=' + hlsOk);
 })();
 </script>

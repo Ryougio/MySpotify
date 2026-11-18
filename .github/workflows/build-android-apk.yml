@@ -75,13 +75,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.44
-          name: "MySpotify Mobile Edition (v0.4.44 - Fix Widevine 403 Downgrade Race & MediaPlayer -38 Error)"
+          tag_name: mobile-v0.4.45
+          name: "MySpotify Mobile Edition (v0.4.45 - Inline HLS Widevine Fix + Full Track Guarantee + Persistent Debug Keystore)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.44 Widevine 极速秒播修复版)
-            - **彻底消除 `what=-38, extra=0` 报错与双音轨竞态**：
-              1. 修复 Free 账号在 256k 授权返回 `403` 自动降级 128k 时，旧 `hls.js` 实例报错竞态误触发 iTunes 备用 `MediaPlayer` 的问题——现在在返回 403 前同步作废旧 `gen` 并全局记住 Free 账号 128k 档位，切歌 **~1.5 秒直出 Spotify 官方原曲**，零报错弹窗。
-              2. 修复 `MediaPlaybackService` 在 `prepareAsync()` 完成前调用 `getDuration()` 导致的 `MediaPlayer onError(what=-38, extra=0)` 状态错误。
+            ### MySpotify Android 客户端 (v0.4.45 完整原曲稳定版)
+            - **彻底根治「变成 30 秒试听」的元凶（`Hls is not defined`）**：
+              1. 将 `hls.min.js` 直接内联打包进 `player.html` 单次 HTTP 响应中（[LocalMediaServer.java](android/app/src/main/java/dev/margbug/vinyl/LocalMediaServer.java)），杜绝锁屏/后台启动时外部脚本加载中断导致的 `Hls is not defined` 错误。
+              2. 已登录 Spotify 账号播歌时禁止静默降级为 30 秒 iTunes 试听，始终坚持播放 Spotify 官方 Widevine 完整原曲（并持久化记住 Free 账号 128k 档位，下次冷启动无需再试探 256k 403）。
+            - **固定 APK 调试签名（`android/debug.keystore`）**：从本版本起，后续所有版本更新均可直接覆盖安装，不再卸载清数据、不再需要反复重新登录！
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:

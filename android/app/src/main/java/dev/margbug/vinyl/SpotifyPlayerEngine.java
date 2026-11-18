@@ -49,9 +49,11 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
     private WebView playerWebView;
 
     private volatile boolean pageReady = false;
+    private volatile boolean reloadAttempted = false;
     private final List<String> pendingJs = Collections.synchronizedList(new ArrayList<>());
     private final Set<String> downgradedUris = ConcurrentHashMap.newKeySet();
     private volatile boolean accountFreeOnly = false;
+    private static final String KEY_ACCOUNT_FREE_ONLY = "spotify_account_free_only";
     private final AtomicInteger playRequestSeq = new AtomicInteger(0);
 
     private volatile int activeGen = 0;
@@ -75,6 +77,8 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
     public SpotifyPlayerEngine(MainActivity activity, FrameLayout hostContainer, UiCallback uiCallback) {
         this.activity = activity;
         this.uiCallback = uiCallback;
+        SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        this.accountFreeOnly = prefs.getBoolean(KEY_ACCOUNT_FREE_ONLY, false);
         this.server = new LocalMediaServer(activity, this);
 
         try {
@@ -197,8 +201,9 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
                 public void onError(Exception error) {
                     if (reqId != playRequestSeq.get()) return;
                     String msg = error.getMessage() != null ? error.getMessage() : "unknown";
-                    Log.w(TAG, "Official Spotify media failed (" + msg + "), falling back to preview resolver");
-                    fallbackToPreview(reqId, msg);
+                    Log.w(TAG, "Official Spotify media failed (" + msg + ")");
+                    // Logged-in users must NOT silently get a 30s iTunes preview; report exact error cleanly!
+                    reportFatalError(msg);
                 }
             });
         } else {
@@ -227,21 +232,29 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
                 LocalMediaServer.TrackSession s = server.getSession(session.gen);
                 int licCode = s != null ? s.lastLicenseCode : 0;
                 Log.w(TAG, "Playback start timeout (gen=" + session.gen + ", licenseHttp=" + licCode + ")");
-                if (licCode == 403 && !downgradedUris.contains(curUri) && activeBitrate > 128000) {
+                if (licCode == 403 && !accountFreeOnly && activeBitrate > 128000) {
                     retryDowngradedBitrate(reqId);
                 } else {
-                    fallbackToPreview(reqId, "Widevine 启动超时 (license=" + licCode + ")");
+                    reportFatalError("Spotify 音频加载超时 (license=" + licCode + ")，请重试");
                 }
             }
         };
         mainHandler.postDelayed(startTimeoutRunnable, 18_000L);
     }
 
+    private void markAccountFreeOnly() {
+        accountFreeOnly = true;
+        try {
+            activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_ACCOUNT_FREE_ONLY, true).apply();
+        } catch (Exception ignored) {}
+    }
+
     private void retryDowngradedBitrate(int reqId) {
         if (curUri == null || curUri.isEmpty()) return;
         if (reqId != playRequestSeq.get()) return;
         Log.i(TAG, "License 403 on high bitrate, switching session to 128k (Free account) for " + curUri);
-        accountFreeOnly = true;
+        markAccountFreeOnly();
         downgradedUris.add(curUri);
         int oldGen = activeGen;
         activeGen = 0;
@@ -414,8 +427,8 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
     public void onLicenseResponse(int gen, int httpCode) {
         if (gen == activeGen && httpCode == 403 && !accountFreeOnly && activeBitrate > 128000) {
             // Synchronously invalidate activeGen BEFORE returning HTTP 403 to hls.js
-            // so the resulting hls.js keySystemError event is 100% ignored and never races with iTunes fallback!
-            accountFreeOnly = true;
+            // so the resulting hls.js keySystemError event is 100% ignored!
+            markAccountFreeOnly();
             downgradedUris.add(curUri);
             activeGen = 0;
             int reqId = playRequestSeq.get();
@@ -432,6 +445,14 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
     public void onPlayerEvent(int gen, String type, double timeSec, String msg, int seq) {
         if ("ready".equals(type)) {
             Log.i(TAG, "Hidden Widevine player ready (" + msg + ")");
+            if (msg != null && msg.contains("hls=false") && !reloadAttempted && server.getPort() > 0) {
+                reloadAttempted = true;
+                Log.w(TAG, "hls=false detected on initial load, reloading playerWebView once...");
+                mainHandler.post(() -> {
+                    if (playerWebView != null) playerWebView.loadUrl(server.getPlayerUrl());
+                });
+                return;
+            }
             pageReady = true;
             List<String> toRun;
             synchronized (pendingJs) {
@@ -505,10 +526,10 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
                 int reqId = playRequestSeq.get();
                 mainHandler.post(() -> {
                     if (gen != activeGen) return;
-                    if (licCode == 403 && activeBitrate > 128000 && !downgradedUris.contains(curUri)) {
+                    if (licCode == 403 && activeBitrate > 128000 && !accountFreeOnly) {
                         retryDowngradedBitrate(reqId);
                     } else {
-                        fallbackToPreview(reqId, msg);
+                        reportFatalError(msg);
                     }
                 });
                 break;

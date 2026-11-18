@@ -34,6 +34,7 @@ public class WebAppInterface {
                 .remove(SpotifyLoginActivity.KEY_ACCESS_TOKEN)
                 .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON)
                 .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES)
+                .remove("spotify_account_free_only")
                 .commit();
         try {
             android.webkit.CookieManager.getInstance().removeAllCookies(null);
@@ -102,6 +103,7 @@ public class WebAppInterface {
                 .remove(SpotifyLoginActivity.KEY_ACCESS_TOKEN)
                 .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON)
                 .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES)
+                .remove("spotify_account_free_only")
                 .commit();
         activity.runOnUiThread(() -> {
             showToast("Cookie 导入成功，正在同步账号...");

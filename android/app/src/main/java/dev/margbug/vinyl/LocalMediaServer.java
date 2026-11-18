@@ -235,7 +235,7 @@ public class LocalMediaServer {
             }
 
             if ("/player.html".equals(path) || "/".equals(path)) {
-                byte[] html = loadAssetCached("player/player.html", true);
+                byte[] html = loadCombinedPlayerHtml();
                 writeResponse(out, 200, "text/html; charset=utf-8", html, null);
             } else if ("/hls.min.js".equals(path)) {
                 byte[] js = loadAssetCached("player/hls.min.js", false);
@@ -427,9 +427,26 @@ public class LocalMediaServer {
         return 0;
     }
 
-    private byte[] loadAssetCached(String assetPath, boolean isHtml) throws IOException {
-        if (isHtml && cachedPlayerHtml != null) return cachedPlayerHtml;
-        if (!isHtml && cachedHlsJs != null) return cachedHlsJs;
+    private synchronized byte[] loadCombinedPlayerHtml() throws IOException {
+        if (cachedPlayerHtml != null) return cachedPlayerHtml;
+        byte[] rawHtml = loadAssetRaw("player/player.html");
+        byte[] hlsJs = loadAssetCached("player/hls.min.js", false);
+        String htmlStr = new String(rawHtml, StandardCharsets.UTF_8);
+        String hlsStr = new String(hlsJs, StandardCharsets.UTF_8);
+        String marker = "/*__HLS_JS_INLINE__*/";
+        int idx = htmlStr.indexOf(marker);
+        String combined;
+        if (idx >= 0) {
+            combined = htmlStr.substring(0, idx) + hlsStr + htmlStr.substring(idx + marker.length());
+        } else {
+            combined = htmlStr;
+        }
+        cachedPlayerHtml = combined.getBytes(StandardCharsets.UTF_8);
+        Log.i(TAG, "Built combined inline player.html (" + cachedPlayerHtml.length + " bytes)");
+        return cachedPlayerHtml;
+    }
+
+    private byte[] loadAssetRaw(String assetPath) throws IOException {
         AssetManager am = appContext.getAssets();
         try (InputStream is = am.open(assetPath);
              ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
@@ -438,11 +455,17 @@ public class LocalMediaServer {
             while ((n = is.read(buf)) != -1) {
                 bos.write(buf, 0, n);
             }
-            byte[] data = bos.toByteArray();
-            if (isHtml) cachedPlayerHtml = data;
-            else cachedHlsJs = data;
-            return data;
+            return bos.toByteArray();
         }
+    }
+
+    private byte[] loadAssetCached(String assetPath, boolean isHtml) throws IOException {
+        if (isHtml && cachedPlayerHtml != null) return cachedPlayerHtml;
+        if (!isHtml && cachedHlsJs != null) return cachedHlsJs;
+        byte[] data = loadAssetRaw(assetPath);
+        if (isHtml) cachedPlayerHtml = data;
+        else cachedHlsJs = data;
+        return data;
     }
 
     private String readLine(BufferedInputStream in) throws IOException {
