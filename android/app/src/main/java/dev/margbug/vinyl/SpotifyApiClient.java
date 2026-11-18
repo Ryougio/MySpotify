@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import okhttp3.ConnectionPool;
+import okhttp3.Dns;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -22,6 +23,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URL;
@@ -96,6 +99,18 @@ public class SpotifyApiClient {
         }
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+                .dns(hostname -> {
+                    // Prefer/force IPv4 when available (critical on Android VPN/Clash IPv4-only TUN
+                    // where ISP IPv6 leaks directly out Wi-Fi and triggers TLS RST / EOFException).
+                    List<InetAddress> all = Dns.SYSTEM.lookup(hostname);
+                    List<InetAddress> v4 = new ArrayList<>();
+                    List<InetAddress> v6 = new ArrayList<>();
+                    for (InetAddress addr : all) {
+                        if (addr instanceof Inet4Address) v4.add(addr);
+                        else v6.add(addr);
+                    }
+                    return !v4.isEmpty() ? v4 : v6;
+                })
                 .connectTimeout(12, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
                 .writeTimeout(15, TimeUnit.SECONDS)
@@ -108,6 +123,23 @@ public class SpotifyApiClient {
         cachedClient = builder.build();
         cachedProxyKey = proxyKey;
         return cachedClient;
+    }
+
+    private static synchronized OkHttpClient getDirectFallbackClient() {
+        return new OkHttpClient.Builder()
+                .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+                .dns(hostname -> {
+                    List<InetAddress> all = Dns.SYSTEM.lookup(hostname);
+                    List<InetAddress> v4 = new ArrayList<>();
+                    for (InetAddress addr : all) {
+                        if (addr instanceof Inet4Address) v4.add(addr);
+                    }
+                    return !v4.isEmpty() ? v4 : all;
+                })
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build();
     }
 
     private static class HttpResult {
@@ -139,6 +171,12 @@ public class SpotifyApiClient {
             } catch (IOException e) {
                 lastEx = e;
                 android.util.Log.w(TAG, "HTTP attempt " + attempt + "/" + maxAttempts + " failed (" + request.url().host() + "): " + e.getMessage());
+                // If user configured a local proxy that is unreachable, automatically fall back to system VPN/TUN
+                if (attempt == 1 && cachedProxyKey != null && !cachedProxyKey.isEmpty()
+                        && e.getMessage() != null && (e.getMessage().contains("127.0.0.1") || e.getMessage().contains("ECONNREFUSED"))) {
+                    android.util.Log.w(TAG, "Configured proxy unreachable, falling back to direct/TUN IPv4");
+                    client = getDirectFallbackClient();
+                }
                 if (attempt < maxAttempts) {
                     try { Thread.sleep(350L * attempt); } catch (InterruptedException ignored) {}
                 }

@@ -75,13 +75,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.40
-          name: "MySpotify Mobile Edition (v0.4.40 - OkHttp HTTP/2 + TLS Retry + Author capture.js + Resilient Sync)"
+          tag_name: mobile-v0.4.41
+          name: "MySpotify Mobile Edition (v0.4.41 - Fix IPv6 Leak Bypassing FlClash/Clash IPv4 TUN)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.40 网络引擎与同步链路重构)
-            - **全面升级至 OkHttp 4.12（HTTP/2 + TLS 1.3 + 自动重试）**：替换 Android 老旧 `HttpURLConnection`（AOSP OkHttp 2.x），对齐桌面端 Go `ForceAttemptHTTP2: true`，针对手机代理/TUN 节点偶发 `SSLHandshakeException / EOFException: connection closed` 自动 3 次退避重试，同时支持 HTTP / SOCKS5 代理。
-            - **完整移植作者 `capture.js` 身份捕获**：登录页在 `open.spotify.com` 自动注入与桌面端完全一致的 `window.__vinyl` 拦截器，直接捕获网页播放器原生的 `accessToken` 与 `clientToken`。
-            - **同步状态永不卡死**：拆分资料、首页、音乐库与喜欢歌曲为独立容错任务，无论成功或网络异常均通过 `finally` 及时结束同步状态并给出明确提示。
+            ### MySpotify Android 客户端 (v0.4.41 代理 IPv6 泄漏导致 TLS 断连彻底修复)
+            - **彻底根治 FlClash / Clash TUN 下 `SSLHandshakeException: connection closed`**：实机诊断发现移动宽带 Wi-Fi 开启 IPv6 时，Android 默认优先走直连 IPv6 绕过仅代理 IPv4（`198.18.0.1/30`）的 `tun0` 虚拟网卡，导致 Spotify TLS 握手被直接重置断连！现已在 OkHttp 底层启用 **IPv4 优先/强制解析（`Inet4Address`）**，100% 强制流量走 FlClash/VPN 隧道，杜绝直连 IPv6 泄漏。
+            - **代理不可达自动降级**：若用户误填本地未监听的代理地址（如 `127.0.0.1:7890`），自动降级走系统 TUN/直连，避免死等超时。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
