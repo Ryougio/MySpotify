@@ -11,16 +11,21 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import org.json.JSONObject;
 
-public class MainActivity extends AppCompatActivity implements MediaPlaybackService.PlaybackEventListener {
+public class MainActivity extends AppCompatActivity implements
+        MediaPlaybackService.PlaybackEventListener,
+        SpotifyPlayerEngine.UiCallback {
 
     private WebView webView;
     private WebAppInterface webAppInterface;
+    private SpotifyPlayerEngine playerEngine;
     private ActivityResultLauncher<Intent> loginLauncher;
     private long lastBackPressTime = 0;
 
@@ -49,8 +54,19 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         window.setStatusBarColor(Color.parseColor("#121212"));
         window.setNavigationBarColor(Color.parseColor("#121212"));
 
+        FrameLayout rootLayout = new FrameLayout(this);
+        rootLayout.setBackgroundColor(Color.parseColor("#121212"));
+        setContentView(rootLayout);
+
+        // Initialize hidden localhost Widevine EME player engine (mirrors desktop internal/player/web.go)
+        playerEngine = new SpotifyPlayerEngine(this, rootLayout, this);
+
         webView = new WebView(this);
-        setContentView(webView);
+        webView.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+        rootLayout.addView(webView);
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -61,7 +77,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         settings.setAllowContentAccess(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.34");
+        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.43");
 
         webAppInterface = new WebAppInterface(this, webView);
         webView.addJavascriptInterface(webAppInterface, "AndroidBridge");
@@ -108,6 +124,10 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         MediaPlaybackService.setEventListener(this);
     }
 
+    public SpotifyPlayerEngine getPlayerEngine() {
+        return playerEngine;
+    }
+
     public void launchSpotifyLogin() {
         Intent intent = new Intent(this, SpotifyLoginActivity.class);
         loginLauncher.launch(intent);
@@ -118,7 +138,8 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
         runOnUiThread(() -> {
             if (webView != null) {
                 webView.evaluateJavascript(
-                        String.format("if (window.onNativePlaybackStateChanged) window.onNativePlaybackStateChanged(%b, %d, %d);",
+                        String.format(java.util.Locale.US,
+                                "if (window.onNativePlaybackStateChanged) window.onNativePlaybackStateChanged(%b, %d, %d);",
                                 isPlaying, currentPositionMs, durationMs),
                         null
                 );
@@ -154,8 +175,58 @@ public class MainActivity extends AppCompatActivity implements MediaPlaybackServ
     }
 
     @Override
+    public void onRemoteTogglePlayPause(boolean wantPlay) {
+        runOnUiThread(() -> {
+            if (playerEngine != null) {
+                if (wantPlay) playerEngine.resume();
+                else playerEngine.pause();
+            }
+        });
+    }
+
+    @Override
+    public void onRemoteSeekTo(int positionMs) {
+        runOnUiThread(() -> {
+            if (playerEngine != null) {
+                playerEngine.seekTo(positionMs);
+            }
+        });
+    }
+
+    @Override
+    public void onQualityChanged(String badgeText) {
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "if (window.onNativeQualityChanged) window.onNativeQualityChanged(" + JSONObject.quote(badgeText != null ? badgeText : "") + ");",
+                        null
+                );
+            }
+        });
+    }
+
+    @Override
+    public void onPlaybackError(String errorMsg) {
+        runOnUiThread(() -> {
+            if (errorMsg != null && !errorMsg.isEmpty()) {
+                Toast.makeText(MainActivity.this, errorMsg, Toast.LENGTH_SHORT).show();
+            }
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "if (window.onNativePlaybackError) window.onNativePlaybackError(" + JSONObject.quote(errorMsg != null ? errorMsg : "") + ");",
+                        null
+                );
+            }
+        });
+    }
+
+    @Override
     protected void onDestroy() {
         MediaPlaybackService.setEventListener(null);
+        if (playerEngine != null) {
+            playerEngine.destroy();
+            playerEngine = null;
+        }
         if (webAppInterface != null) {
             webAppInterface.cleanup();
         }

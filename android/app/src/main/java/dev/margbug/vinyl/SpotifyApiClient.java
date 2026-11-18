@@ -44,10 +44,72 @@ import java.util.regex.Pattern;
 public class SpotifyApiClient {
 
     private static final String TAG = "SpotifyApiClient";
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+    public static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
     private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
     private static final ExecutorService executor = Executors.newCachedThreadPool();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final java.util.Map<String, MirrorEntry> mirrorCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long MIRROR_TTL_MS = 23L * 60 * 60 * 1000;
+
+    private static class MirrorEntry {
+        final List<String> urls;
+        final long fetchedAtMs;
+        MirrorEntry(List<String> urls, long fetchedAtMs) {
+            this.urls = urls;
+            this.fetchedAtMs = fetchedAtMs;
+        }
+    }
+
+    public static class RawHttpResult {
+        public final int code;
+        public final byte[] body;
+        public final String contentType;
+        public final String contentRange;
+        public final String acceptRanges;
+        public final String contentLength;
+
+        RawHttpResult(int code, byte[] body, String contentType, String contentRange, String acceptRanges, String contentLength) {
+            this.code = code;
+            this.body = body != null ? body : new byte[0];
+            this.contentType = contentType;
+            this.contentRange = contentRange;
+            this.acceptRanges = acceptRanges;
+            this.contentLength = contentLength;
+        }
+    }
+
+    public static class Identity {
+        public final String accessToken;
+        public final String clientToken;
+        public final boolean isAnonymous;
+
+        Identity(String accessToken, String clientToken, boolean isAnonymous) {
+            this.accessToken = accessToken != null ? accessToken : "";
+            this.clientToken = clientToken != null ? clientToken : "";
+            this.isAnonymous = isAnonymous;
+        }
+    }
+
+    public static class SpotifyMedia {
+        public final String manifest;
+        public final String fileUrl;
+        public final String fileId;
+        public final long durationMs;
+        public final int bitrate;
+
+        SpotifyMedia(String manifest, String fileUrl, String fileId, long durationMs, int bitrate) {
+            this.manifest = manifest != null ? manifest : "";
+            this.fileUrl = fileUrl != null ? fileUrl : "";
+            this.fileId = fileId != null ? fileId : "";
+            this.durationMs = durationMs;
+            this.bitrate = bitrate;
+        }
+    }
+
+    public interface MediaCallback {
+        void onSuccess(SpotifyMedia media);
+        void onError(Exception error);
+    }
 
     private static volatile OkHttpClient cachedClient;
     private static volatile String cachedProxyKey = "";
@@ -168,13 +230,10 @@ public class SpotifyApiClient {
     }
 
     /**
-     * Executes an OkHttp request with smart multi-transport retry:
-     * 1) Default HTTP/2 + IPv4 client
-     * 2) Evict stale pool + fresh HTTP/1.1 connection
-     * 3) Auto-detect local FlClash/Clash mixed-port (127.0.0.1:7890) to bypass TUN MTU drops
+     * Executes an OkHttp request returning raw bytes + headers with multi-transport retry.
      */
-    private static HttpResult executeWithRetry(Request request, int maxAttempts, int timeoutSec) throws IOException {
-        int attempts = Math.max(maxAttempts, 3);
+    public static RawHttpResult executeRawWithRetry(Request request, int maxAttempts, int timeoutSec) throws IOException {
+        int attempts = Math.max(maxAttempts, 1);
         OkHttpClient client = getHttpClient();
         if (timeoutSec > 0) {
             client = client.newBuilder()
@@ -186,28 +245,33 @@ public class SpotifyApiClient {
         Request currentReq = request;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try (Response resp = client.newCall(currentReq).execute()) {
-                String body = resp.body() != null ? resp.body().string() : "";
-                return new HttpResult(resp.code(), body);
+                byte[] bytes = resp.body() != null ? resp.body().bytes() : new byte[0];
+                return new RawHttpResult(
+                        resp.code(),
+                        bytes,
+                        resp.header("Content-Type"),
+                        resp.header("Content-Range"),
+                        resp.header("Accept-Ranges"),
+                        resp.header("Content-Length")
+                );
             } catch (IOException e) {
                 lastEx = e;
                 String msg = e.getMessage() != null ? e.getMessage() : "";
                 android.util.Log.w(TAG, "HTTP attempt " + attempt + "/" + attempts + " failed (" + request.url().host() + "): " + msg);
                 try { client.connectionPool().evictAll(); } catch (Exception ignored) {}
 
-                if (attempt == 1) {
+                if (attempt == 1 && attempts > 1) {
                     if (cachedProxyKey != null && !cachedProxyKey.isEmpty()
                             && (msg.contains("127.0.0.1") || msg.contains("ECONNREFUSED"))) {
                         android.util.Log.w(TAG, "Configured proxy unreachable, falling back to direct/TUN IPv4");
                         client = buildFallbackClient(null, true, timeoutSec);
                     } else if ((cachedProxyKey == null || cachedProxyKey.isEmpty()) && isLocalProxyPortOpen(7890)) {
-                        // Bypass FlClash tun0 MTU 9000 fragmentation via local mixed-port 127.0.0.1:7890
                         android.util.Log.d(TAG, "TUN reset detected; retrying via local Clash proxy 127.0.0.1:7890");
                         client = buildFallbackClient(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 7890)), false, timeoutSec);
                     } else {
                         client = buildFallbackClient(parseConfiguredProxy(), true, timeoutSec);
                     }
-                } else if (attempt == 2) {
-                    // Fresh HTTP/1.1 non-pooled connection
+                } else if (attempt == 2 && attempts > 2) {
                     Proxy p = (cachedProxyKey == null || cachedProxyKey.isEmpty()) && isLocalProxyPortOpen(7890)
                             ? new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 7890))
                             : parseConfiguredProxy();
@@ -216,11 +280,19 @@ public class SpotifyApiClient {
                 }
 
                 if (attempt < attempts) {
-                    try { Thread.sleep(300L * attempt); } catch (InterruptedException ignored) {}
+                    try { Thread.sleep(250L * attempt); } catch (InterruptedException ignored) {}
                 }
             }
         }
         throw lastEx != null ? lastEx : new IOException("Request failed");
+    }
+
+    /**
+     * Executes an OkHttp request returning UTF-8 String body with smart multi-transport retry.
+     */
+    private static HttpResult executeWithRetry(Request request, int maxAttempts, int timeoutSec) throws IOException {
+        RawHttpResult raw = executeRawWithRetry(request, Math.max(maxAttempts, 3), timeoutSec);
+        return new HttpResult(raw.code, new String(raw.body, StandardCharsets.UTF_8));
     }
 
     public static HttpURLConnection openConnection(URL url) throws Exception {
@@ -275,9 +347,9 @@ public class SpotifyApiClient {
                     .header("User-Agent", USER_AGENT)
                     .get()
                     .build();
-            HttpResult res = executeWithRetry(req, 2, 5);
+            RawHttpResult res = executeRawWithRetry(req, 1, 3);
             if (res.code == 200) {
-                JSONObject json = new JSONObject(res.body);
+                JSONObject json = new JSONObject(new String(res.body, StandardCharsets.UTF_8));
                 long sec = json.optLong("serverTime", 0);
                 if (sec > 0) return sec * 1000L;
             }
@@ -530,38 +602,303 @@ public class SpotifyApiClient {
     }
 
     /**
-     * Resolves playable full audio stream URL using NetEase Cloud Music search index
-     * when Spotify's preview_url is not provided or null.
+     * Synchronously returns the current valid Spotify Identity (accessToken + clientToken),
+     * renewing via /api/token if expired or forceRenew == true.
+     */
+    public static synchronized Identity getIdentitySync(Context context, boolean forceRenew) throws IOException {
+        Context ctx = context != null ? context.getApplicationContext() : appContext;
+        if (ctx == null) throw new IOException("Context not initialized");
+        SharedPreferences prefs = ctx.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        String spDc = prefs.getString(SpotifyLoginActivity.KEY_SP_DC, null);
+        boolean hasSpDc = spDc != null && !spDc.trim().isEmpty();
+
+        if (!forceRenew) {
+            String cachedToken = prefs.getString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, "");
+            boolean isAnon = prefs.getBoolean(KEY_ACCESS_TOKEN_ANON, true);
+            long expires = prefs.getLong(KEY_ACCESS_TOKEN_EXPIRES, 0);
+            String ct = prefs.getString(KEY_CLIENT_TOKEN, "");
+            if (cachedToken != null && !cachedToken.isEmpty()
+                    && (!hasSpDc || !isAnon)
+                    && (expires == 0 || System.currentTimeMillis() < expires - 60_000L)) {
+                return new Identity(cachedToken, ct != null ? ct : "", isAnon);
+            }
+        }
+
+        long nowMs = System.currentTimeMillis();
+        long serverTimeMs = getServerTime();
+        String lastError = "Token renew failed";
+        for (String[] secretPair : TOTP_SECRETS) {
+            byte[] key = unmaskTotpSecret(secretPair[0]);
+            int version = Integer.parseInt(secretPair[1]);
+            String totpNow = computeTotp(key, nowMs);
+            String totpServer = computeTotp(key, serverTimeMs);
+
+            String query = "reason=init&productType=web_player" +
+                    "&totp=" + totpNow +
+                    "&totpServer=" + totpServer +
+                    "&totpVer=" + version;
+
+            Request.Builder rb = new Request.Builder()
+                    .url("https://open.spotify.com/api/token?" + query)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", "https://open.spotify.com/")
+                    .header("Accept", "application/json")
+                    .get();
+
+            if (hasSpDc) {
+                rb.header("Cookie", "sp_dc=" + spDc.trim());
+            }
+
+            HttpResult res = executeWithRetry(rb.build(), 3, 12);
+            if (res.code >= 200 && res.code < 300) {
+                try {
+                    JSONObject json = new JSONObject(res.body);
+                    String token = json.optString("accessToken", "");
+                    String clientId = json.optString("clientId", "");
+                    boolean isAnon = json.optBoolean("isAnonymous", !hasSpDc);
+                    long expires = json.optLong("accessTokenExpirationTimestampMs", System.currentTimeMillis() + 1800_000L);
+                    String clientToken = getOrFetchClientToken(ctx, clientId);
+                    if (!token.isEmpty() && (!hasSpDc || !isAnon)) {
+                        prefs.edit()
+                                .putString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, token)
+                                .putBoolean(KEY_ACCESS_TOKEN_ANON, isAnon)
+                                .putLong(KEY_ACCESS_TOKEN_EXPIRES, expires)
+                                .commit();
+                    }
+                    return new Identity(token, clientToken, isAnon);
+                } catch (Exception je) {
+                    lastError = "Token parse failed: " + je.getMessage();
+                }
+            } else {
+                lastError = "Token HTTP " + res.code + " (ver=" + version + ")";
+            }
+        }
+        throw new IOException(lastError);
+    }
+
+    private static RawHttpResult spClientGetSync(Context ctx, String path, String accept) throws IOException {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            Identity id = getIdentitySync(ctx, attempt > 0);
+            Request.Builder rb = new Request.Builder()
+                    .url("https://spclient.wg.spotify.com" + path)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", accept)
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                    .header("app-platform", "WebPlayer")
+                    .header("Referer", "https://open.spotify.com/")
+                    .get();
+            if (!id.accessToken.isEmpty()) {
+                rb.header("Authorization", "Bearer " + id.accessToken);
+            }
+            if (!id.clientToken.isEmpty()) {
+                rb.header("client-token", id.clientToken);
+            }
+            RawHttpResult res = executeRawWithRetry(rb.build(), 3, 15);
+            if (res.code == 401 && attempt == 0) {
+                android.util.Log.w(TAG, "spclient " + path + " returned 401, renewing token");
+                continue;
+            }
+            return res;
+        }
+        throw new IOException("spclient unauthorized");
+    }
+
+    /**
+     * Exact Android port of upstream internal/spotify/media.go:ResolveMedia + media_other.go.
+     * Resolves an official Spotify track or podcast episode into an HLS Widevine manifest (or external file URL).
+     */
+    public static void resolveSpotifyMedia(Context context, String uri, boolean preferHighQuality, boolean forceLowestBitrate, MediaCallback callback) {
+        executor.execute(() -> {
+            try {
+                if (uri == null || uri.trim().isEmpty()) {
+                    throw new IOException("Empty Spotify URI");
+                }
+                boolean isEpisode = uri.startsWith("spotify:episode:");
+                String query = "manifestFileFormat=file_ids_mp4&manifestFileFormat=file_ids_mp4_dual";
+                if (isEpisode) {
+                    query += "&manifestFileFormat=file_urls_external";
+                }
+                RawHttpResult raw = spClientGetSync(context, "/track-playback/v1/media/" + uri + "?" + query, "application/json");
+                if (raw.code < 200 || raw.code >= 300) {
+                    String preview = new String(raw.body, StandardCharsets.UTF_8);
+                    if (preview.length() > 200) preview = preview.substring(0, 200);
+                    throw new IOException("track-playback HTTP " + raw.code + ": " + preview);
+                }
+
+                JSONObject root = new JSONObject(new String(raw.body, StandardCharsets.UTF_8));
+                JSONObject mediaMap = root.optJSONObject("media");
+                if (mediaMap == null) throw new IOException("track-playback: empty media map");
+
+                JSONObject entry = mediaMap.optJSONObject(uri);
+                if (entry == null) {
+                    java.util.Iterator<String> keys = mediaMap.keys();
+                    while (keys.hasNext()) {
+                        String k = keys.next();
+                        JSONObject cand = mediaMap.optJSONObject(k);
+                        if (cand != null) {
+                            JSONObject it = cand.optJSONObject("item");
+                            String tt = it != null ? it.optString("track_type", "") : "";
+                            if (!"VIDEO".equals(tt)) {
+                                entry = cand;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (entry == null) throw new IOException("track-playback: no media entry for " + uri);
+
+                JSONObject item = entry.optJSONObject("item");
+                if (item == null) throw new IOException("track-playback: missing item");
+                JSONObject meta = item.optJSONObject("metadata");
+                long durationMs = meta != null ? meta.optLong("duration", 0) : 0;
+                JSONObject manifestObj = item.optJSONObject("manifest");
+                if (manifestObj == null) throw new IOException("track-playback: missing manifest");
+
+                class FileCand {
+                    String fileId;
+                    int bitrate;
+                }
+                List<FileCand> candidates = new ArrayList<>();
+                String[] formats = new String[]{"file_ids_mp4", "file_ids_mp4_dual"};
+                for (String fmt : formats) {
+                    JSONArray arr = manifestObj.optJSONArray(fmt);
+                    if (arr == null) continue;
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject f = arr.optJSONObject(i);
+                        if (f == null) continue;
+                        String tt = f.optString("track_type", "");
+                        String fid = f.optString("file_id", "");
+                        if ((tt.isEmpty() || "AUDIO".equals(tt)) && !fid.isEmpty()) {
+                            FileCand c = new FileCand();
+                            c.fileId = fid;
+                            c.bitrate = f.optInt("bitrate", 0);
+                            candidates.add(c);
+                        }
+                    }
+                    if (!candidates.isEmpty()) break;
+                }
+
+                // Podcast external audio fallback
+                if (candidates.isEmpty() && isEpisode) {
+                    JSONArray extArr = manifestObj.optJSONArray("file_urls_external");
+                    if (extArr != null) {
+                        for (int i = 0; i < extArr.length(); i++) {
+                            JSONObject f = extArr.optJSONObject(i);
+                            String fileUrl = f != null ? f.optString("file_url", "") : "";
+                            if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+                                SpotifyMedia out = new SpotifyMedia("", fileUrl, "", durationMs, 0);
+                                android.util.Log.i(TAG, "Resolved external episode audio: " + uri);
+                                mainHandler.post(() -> callback.onSuccess(out));
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                if (candidates.isEmpty()) {
+                    throw new IOException("track-playback: no MP4 audio files for " + uri);
+                }
+
+                candidates.sort((a, b) -> Integer.compare(a.bitrate, b.bitrate));
+                FileCand chosen = (preferHighQuality && !forceLowestBitrate)
+                        ? candidates.get(candidates.size() - 1)
+                        : candidates.get(0);
+
+                RawHttpResult hlsRes = spClientGetSync(
+                        context,
+                        "/sneaktables/v2/hls/1/" + chosen.fileId + "/audio.m3u8",
+                        "application/vnd.apple.mpegurl"
+                );
+                if (hlsRes.code < 200 || hlsRes.code >= 300) {
+                    throw new IOException("sneaktables HLS HTTP " + hlsRes.code);
+                }
+                String m3u8 = new String(hlsRes.body, StandardCharsets.UTF_8);
+                android.util.Log.i(TAG, "Resolved Spotify HLS: uri=" + uri + " fileId=" + chosen.fileId + " bitrate=" + chosen.bitrate + " len=" + m3u8.length());
+                SpotifyMedia media = new SpotifyMedia(m3u8, "", chosen.fileId, durationMs, chosen.bitrate);
+                mainHandler.post(() -> callback.onSuccess(media));
+            } catch (Exception e) {
+                android.util.Log.e(TAG, "resolveSpotifyMedia failed (" + uri + "): " + e.getMessage());
+                mainHandler.post(() -> callback.onError(e));
+            }
+        });
+    }
+
+    /**
+     * Exact port of upstream internal/spotify/mirrors.go:Mirrors.
+     * Returns alternate signed CDN URLs for a 40-char hex Spotify fileId.
+     */
+    public static List<String> getCdnMirrorsSync(Context context, String fileId) {
+        if (fileId == null || fileId.length() != 40) return java.util.Collections.emptyList();
+        String key = fileId.toLowerCase(Locale.US);
+        MirrorEntry cached = mirrorCache.get(key);
+        long now = System.currentTimeMillis();
+        if (cached != null && (now - cached.fetchedAtMs) < MIRROR_TTL_MS) {
+            return cached.urls;
+        }
+        try {
+            String path = "/storage-resolve/v2/files/audio/interactive/10/" + key
+                    + "?version=10000000&product=9&platform=39&alt=json";
+            RawHttpResult res = spClientGetSync(context, path, "application/json");
+            if (res.code >= 200 && res.code < 300) {
+                JSONObject json = new JSONObject(new String(res.body, StandardCharsets.UTF_8));
+                JSONArray arr = json.optJSONArray("cdnurl");
+                if (arr != null && arr.length() > 0) {
+                    List<String> urls = new ArrayList<>();
+                    for (int i = 0; i < arr.length(); i++) {
+                        String u = arr.optString(i, "");
+                        if (!u.isEmpty()) urls.add(u);
+                    }
+                    if (!urls.isEmpty()) {
+                        mirrorCache.put(key, new MirrorEntry(urls, now));
+                        return urls;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "getCdnMirrorsSync failed for " + key + ": " + e.getMessage());
+        }
+        return java.util.Collections.emptyList();
+    }
+
+    /**
+     * Fallback audio preview resolver (used only in guest mode or when Spotify DRM stream is unavailable).
+     * Uses global unblocked Apple iTunes Search API instead of broken NetEase outer/url 404.
      */
     public static void resolveAudioUrl(String title, String artist, ApiCallback callback) {
         executor.execute(() -> {
             try {
-                String query = title + (artist != null && !artist.isEmpty() ? " " + artist.split(",")[0].trim() : "");
-                URL searchUrl = new URL("https://music.163.com/api/cloudsearch/pc?type=1&s=" + URLEncoder.encode(query, "UTF-8") + "&limit=1");
-                HttpURLConnection conn = (HttpURLConnection) searchUrl.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("User-Agent", USER_AGENT);
-                conn.setConnectTimeout(6000);
-                conn.setReadTimeout(6000);
-
-                if (conn.getResponseCode() == 200) {
-                    String body = readStream(conn.getInputStream());
-                    JSONObject res = new JSONObject(body);
-                    JSONArray songs = res.optJSONObject("result") != null ? res.getJSONObject("result").optJSONArray("songs") : null;
-                    if (songs != null && songs.length() > 0) {
-                        long songId = songs.getJSONObject(0).getLong("id");
-                        String audioUrl = "https://music.163.com/song/media/outer/url?id=" + songId + ".mp3";
-                        JSONObject out = new JSONObject();
-                        out.put("audioUrl", audioUrl);
-                        out.put("songId", songId);
-                        mainHandler.post(() -> callback.onSuccess(out.toString()));
-                        conn.disconnect();
-                        return;
+                String primaryArtist = artist != null && !artist.isEmpty() ? artist.split(",")[0].trim() : "";
+                String query = (title != null ? title : "") + (primaryArtist.isEmpty() ? "" : " " + primaryArtist);
+                String url = "https://itunes.apple.com/search?term=" + URLEncoder.encode(query.trim(), "UTF-8")
+                        + "&media=music&entity=song&limit=5";
+                Request req = new Request.Builder()
+                        .url(url)
+                        .header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/json")
+                        .get()
+                        .build();
+                HttpResult res = executeWithRetry(req, 2, 10);
+                if (res.code == 200) {
+                    JSONObject json = new JSONObject(res.body);
+                    JSONArray results = json.optJSONArray("results");
+                    if (results != null && results.length() > 0) {
+                        for (int i = 0; i < results.length(); i++) {
+                            JSONObject item = results.optJSONObject(i);
+                            String previewUrl = item != null ? item.optString("previewUrl", "") : "";
+                            if (previewUrl.startsWith("http")) {
+                                JSONObject out = new JSONObject();
+                                out.put("audioUrl", previewUrl);
+                                out.put("source", "itunes_preview");
+                                android.util.Log.i(TAG, "Resolved fallback iTunes preview for: " + query);
+                                mainHandler.post(() -> callback.onSuccess(out.toString()));
+                                return;
+                            }
+                        }
                     }
                 }
-                conn.disconnect();
-                mainHandler.post(() -> callback.onError(new Exception("No matching audio stream found")));
+                mainHandler.post(() -> callback.onError(new Exception("No matching preview stream found")));
             } catch (Exception e) {
+                android.util.Log.w(TAG, "resolveAudioUrl fallback failed: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e));
             }
         });

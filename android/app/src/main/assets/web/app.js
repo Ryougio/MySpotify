@@ -281,19 +281,44 @@
                 window.AndroidBridge.fetchLyrics(trackId || "", title || "", artist || "", Math.floor(durationSec || 0), cbName);
             });
         },
+        playSpotifyTrack(uri, title, artist, album, cover, durationMs) {
+            if (window.AndroidBridge && window.AndroidBridge.playSpotifyTrack) {
+                window.AndroidBridge.playSpotifyTrack(
+                    uri || "",
+                    title || "",
+                    artist || "",
+                    album || "",
+                    cover || "",
+                    Math.max(0, Math.floor(durationMs || 0))
+                );
+            } else if (window.AndroidBridge && window.AndroidBridge.playTrack) {
+                window.AndroidBridge.playTrack(uri || "", title || "", artist || "", album || "", cover || "");
+            }
+        },
         playAudio(url, title, artist, cover) {
             if (window.AndroidBridge && window.AndroidBridge.playAudio) {
                 window.AndroidBridge.playAudio(url, title || "", artist || "", cover || "");
+            } else if (window.AndroidBridge && window.AndroidBridge.playTrack) {
+                window.AndroidBridge.playTrack(url, title || "", artist || "", "", cover || "");
             }
         },
         pauseAudio() {
             if (window.AndroidBridge && window.AndroidBridge.pauseAudio) {
                 window.AndroidBridge.pauseAudio();
+            } else if (window.AndroidBridge && window.AndroidBridge.pauseTrack) {
+                window.AndroidBridge.pauseTrack();
             }
         },
         resumeAudio() {
             if (window.AndroidBridge && window.AndroidBridge.resumeAudio) {
                 window.AndroidBridge.resumeAudio();
+            } else if (window.AndroidBridge && window.AndroidBridge.resumeTrack) {
+                window.AndroidBridge.resumeTrack();
+            }
+        },
+        setCrossfade(secs) {
+            if (window.AndroidBridge && window.AndroidBridge.setCrossfade) {
+                window.AndroidBridge.setCrossfade(Math.max(0, Math.floor(Number(secs) || 0)));
             }
         },
         seekAudio(posMs) {
@@ -720,6 +745,7 @@
             const cfLabel = document.getElementById("crossfadeValLabel");
             if (cfSlider) cfSlider.value = String(state.crossfadeSec);
             if (cfLabel) cfLabel.textContent = state.crossfadeSec > 0 ? `${state.crossfadeSec} 秒` : "关闭";
+            Native.setCrossfade(state.crossfadeSec);
 
             if (sess.currentTrack && sess.currentTrack.title) {
                 state.currentTrack = sess.currentTrack;
@@ -1713,7 +1739,10 @@
                     Native.toast(`同步完成：${state.likedTracks.length} 首喜欢 · ${state.userPlaylists.length} 歌单 · ${state.userAlbums.length} 专辑 · ${state.userArtists.length} 艺人`);
                 } else {
                     const msg = (anyError && anyError.message) || "网络连接断开";
-                    Native.toast("同步失败：" + msg + "（建议切换代理节点后重试）");
+                    const tip = msg.includes("connection closed")
+                        ? "（FlClash 对 Spotify 握手被重置，请为 Spotify 指定稳定海外节点）"
+                        : "（建议切换代理节点后重试）";
+                    Native.toast("同步失败：" + msg + tip);
                 }
             } else if (!syncedAny && !state.bootRetryScheduled) {
                 // 对齐桌面端 ui_account.go: 启动时若网络未就绪，保留上次快照并在 15 秒后静默重试一次
@@ -1728,7 +1757,13 @@
                 document.getElementById("settingsAccountName").textContent = "已登录 (点击立即同步)";
                 document.getElementById("settingsAccountTier").textContent = "网络波动";
             }
-            if (showToast) Native.toast("同步异常：" + (err.message || "请检查网络或代理节点"));
+            if (showToast) {
+                const em = (err && err.message) || "请检查网络或代理节点";
+                const tip = em.includes("connection closed")
+                    ? "（请在 FlClash 中检查 Spotify 规则/切换海外节点）"
+                    : "";
+                Native.toast("同步异常：" + em + tip);
+            }
         } finally {
             state.isSyncing = false;
             if (syncBtn) syncBtn.textContent = "立即同步";
@@ -2341,26 +2376,22 @@
         // 异步加载高精歌词
         loadTrackLyrics(track);
 
-        // 解析可播放音频流
+        // 使用与桌面端完全一致的 Spotify 官方 Widevine EME + HLS.js 流媒体引擎播放
         const qualityBadge = document.getElementById("npQualityBadge");
         if (qualityBadge) {
             qualityBadge.style.display = "inline-block";
-            qualityBadge.textContent = "HQ";
+            qualityBadge.textContent = "缓冲中";
         }
-        try {
-            const audioRes = await Native.resolveAudioUrl(track.title, track.artist);
-            if (audioRes && audioRes.audioUrl) {
-                if (qualityBadge) qualityBadge.textContent = "256k";
-                state.audioLoadedId = track.id || track.title;
-                Native.playAudio(audioRes.audioUrl, track.title, track.artist, track.cover || "");
-            } else {
-                if (qualityBadge) qualityBadge.style.display = "none";
-                Native.toast("暂未匹配到可播放音源");
-            }
-        } catch (err) {
-            if (qualityBadge) qualityBadge.style.display = "none";
-            Native.toast("音源解析失败：" + (err.message || ""));
-        }
+        const trackUri = track.uri || (track.id ? ("spotify:track:" + track.id) : "");
+        state.audioLoadedId = track.id || track.title;
+        Native.playSpotifyTrack(
+            trackUri,
+            track.title || "",
+            track.artist || "",
+            track.album || "",
+            track.cover || "",
+            track.durationMs || 0
+        );
     }
 
     function playNextTrack() {
@@ -2595,6 +2626,25 @@
     window.onNativeNextRequested = () => playNextTrack();
     window.onNativePrevRequested = () => playPrevTrack();
 
+    window.onNativeQualityChanged = function (badge) {
+        const qualityBadge = document.getElementById("npQualityBadge");
+        if (!qualityBadge) return;
+        if (badge) {
+            qualityBadge.style.display = "inline-block";
+            qualityBadge.textContent = badge;
+        } else {
+            qualityBadge.style.display = "none";
+        }
+    };
+
+    window.onNativePlaybackError = function (msg) {
+        updatePlayPauseIcons(false);
+        state.audioLoadedId = "";
+        const qualityBadge = document.getElementById("npQualityBadge");
+        if (qualityBadge) qualityBadge.style.display = "none";
+        console.error("[NativePlaybackError]", msg);
+    };
+
     window.onNativeLoginSuccess = function (loggedIn) {
         if (loggedIn) {
             state.accessToken = "";
@@ -2764,6 +2814,7 @@
             cfSlider.addEventListener("input", () => {
                 state.crossfadeSec = parseInt(cfSlider.value, 10) || 0;
                 if (cfLabel) cfLabel.textContent = state.crossfadeSec > 0 ? `${state.crossfadeSec} 秒` : "关闭";
+                Native.setCrossfade(state.crossfadeSec);
                 savePlaybackSession();
             });
         }

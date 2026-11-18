@@ -27,6 +27,7 @@ import android.os.PowerManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
@@ -43,6 +44,8 @@ public class MediaPlaybackService extends Service implements
         MediaPlayer.OnErrorListener,
         AudioManager.OnAudioFocusChangeListener {
 
+    private static final String TAG = "MediaPlaybackService";
+
     public static final String ACTION_PLAY = "dev.margbug.vinyl.PLAY";
     public static final String ACTION_PAUSE = "dev.margbug.vinyl.PAUSE";
     public static final String ACTION_RESUME = "dev.margbug.vinyl.RESUME";
@@ -53,6 +56,7 @@ public class MediaPlaybackService extends Service implements
     public static final String ACTION_SEEK = "dev.margbug.vinyl.SEEK";
     public static final String ACTION_SET_EQ = "dev.margbug.vinyl.SET_EQ";
     public static final String ACTION_SET_SPEED = "dev.margbug.vinyl.SET_SPEED";
+    public static final String ACTION_SYNC_WEB_STATE = "dev.margbug.vinyl.SYNC_WEB_STATE";
 
     private static final String CHANNEL_ID = "vinyl_playback_channel";
     private static final int NOTIFICATION_ID = 1001;
@@ -62,6 +66,9 @@ public class MediaPlaybackService extends Service implements
         void onTrackEnded();
         void onNextRequested();
         void onPrevRequested();
+        void onRemoteTogglePlayPause(boolean wantPlay);
+        void onRemoteSeekTo(int positionMs);
+        void onPlaybackError(String errorMsg);
     }
 
     private static PlaybackEventListener eventListener;
@@ -82,11 +89,15 @@ public class MediaPlaybackService extends Service implements
     private WifiManager.WifiLock wifiLock;
 
     private String currentTitle = "MySpotify";
-    private String currentArtist = "Spotify Desktop on Android";
+    private String currentArtist = "Spotify on Android";
     private String currentAlbum = "";
     private String currentCoverUrl = "";
+    private String loadedCoverUrl = "";
     private Bitmap currentCoverBitmap = null;
     private boolean isPlaying = false;
+    private boolean webEngineActive = false;
+    private int webPositionMs = 0;
+    private int webDurationMs = 0;
 
     private final Handler progressHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService coverExecutor = Executors.newSingleThreadExecutor();
@@ -95,7 +106,11 @@ public class MediaPlaybackService extends Service implements
         @Override
         public void onReceive(Context context, Intent intent) {
             if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
-                pause();
+                if (webEngineActive) {
+                    if (eventListener != null) eventListener.onRemoteTogglePlayPause(false);
+                } else {
+                    pause();
+                }
             }
         }
     };
@@ -103,7 +118,7 @@ public class MediaPlaybackService extends Service implements
     private final Runnable progressRunnable = new Runnable() {
         @Override
         public void run() {
-            if (mediaPlayer != null && isPlaying) {
+            if (!webEngineActive && mediaPlayer != null && isPlaying) {
                 try {
                     int pos = mediaPlayer.getCurrentPosition();
                     int dur = mediaPlayer.getDuration();
@@ -121,7 +136,6 @@ public class MediaPlaybackService extends Service implements
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
-        initMediaPlayer();
         initMediaSession();
 
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -136,7 +150,11 @@ public class MediaPlaybackService extends Service implements
             wifiLock.setReferenceCounted(false);
         }
 
-        registerReceiver(noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+        }
     }
 
     private void createNotificationChannel() {
@@ -175,12 +193,20 @@ public class MediaPlaybackService extends Service implements
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
-                resume();
+                if (webEngineActive) {
+                    if (eventListener != null) eventListener.onRemoteTogglePlayPause(true);
+                } else {
+                    resume();
+                }
             }
 
             @Override
             public void onPause() {
-                pause();
+                if (webEngineActive) {
+                    if (eventListener != null) eventListener.onRemoteTogglePlayPause(false);
+                } else {
+                    pause();
+                }
             }
 
             @Override
@@ -195,7 +221,11 @@ public class MediaPlaybackService extends Service implements
 
             @Override
             public void onSeekTo(long pos) {
-                seekTo((int) pos);
+                if (webEngineActive) {
+                    if (eventListener != null) eventListener.onRemoteSeekTo((int) pos);
+                } else {
+                    seekTo((int) pos);
+                }
             }
 
             @Override
@@ -208,10 +238,45 @@ public class MediaPlaybackService extends Service implements
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // CRITICAL for Android 12/14/15: promote to foreground immediately before any async work!
+        try {
+            updateNotification();
+        } catch (Exception e) {
+            Log.e(TAG, "Immediate startForeground failed: " + e.getMessage());
+        }
+
         if (intent == null) return START_NOT_STICKY;
 
         String action = intent.getAction();
-        if (ACTION_PLAY.equals(action)) {
+        if (ACTION_SYNC_WEB_STATE.equals(action)) {
+            webEngineActive = true;
+            stopNativeMediaPlayerQuietly();
+            String t = intent.getStringExtra("title");
+            String a = intent.getStringExtra("artist");
+            String al = intent.getStringExtra("album");
+            String c = intent.getStringExtra("coverUrl");
+            if (t != null && !t.isEmpty()) currentTitle = t;
+            if (a != null) currentArtist = a;
+            if (al != null) currentAlbum = al;
+            if (c != null) currentCoverUrl = c;
+            isPlaying = intent.getBooleanExtra("isPlaying", isPlaying);
+            webPositionMs = intent.getIntExtra("positionMs", webPositionMs);
+            webDurationMs = intent.getIntExtra("durationMs", webDurationMs);
+
+            if (isPlaying) {
+                requestAudioFocus();
+                acquireLocks();
+            } else {
+                releaseLocks();
+            }
+            if (currentCoverUrl != null && !currentCoverUrl.isEmpty() && !currentCoverUrl.equals(loadedCoverUrl)) {
+                fetchCoverBitmap(currentCoverUrl);
+            }
+            updatePlaybackState(isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED, webPositionMs);
+            updateMediaMetadata();
+            updateNotification();
+        } else if (ACTION_PLAY.equals(action)) {
+            webEngineActive = false;
             String url = intent.getStringExtra("url");
             currentTitle = intent.getStringExtra("title");
             currentArtist = intent.getStringExtra("artist");
@@ -219,18 +284,34 @@ public class MediaPlaybackService extends Service implements
             currentCoverUrl = intent.getStringExtra("coverUrl");
             playUrl(url);
         } else if (ACTION_PAUSE.equals(action)) {
-            pause();
+            if (webEngineActive) {
+                if (eventListener != null) eventListener.onRemoteTogglePlayPause(false);
+            } else {
+                pause();
+            }
         } else if (ACTION_RESUME.equals(action)) {
-            resume();
+            if (webEngineActive) {
+                if (eventListener != null) eventListener.onRemoteTogglePlayPause(true);
+            } else {
+                resume();
+            }
         } else if (ACTION_TOGGLE.equals(action)) {
-            if (isPlaying) pause(); else resume();
+            if (webEngineActive) {
+                if (eventListener != null) eventListener.onRemoteTogglePlayPause(!isPlaying);
+            } else {
+                if (isPlaying) pause(); else resume();
+            }
         } else if (ACTION_NEXT.equals(action)) {
             if (eventListener != null) eventListener.onNextRequested();
         } else if (ACTION_PREV.equals(action)) {
             if (eventListener != null) eventListener.onPrevRequested();
         } else if (ACTION_SEEK.equals(action)) {
             int positionMs = intent.getIntExtra("positionMs", 0);
-            seekTo(positionMs);
+            if (webEngineActive) {
+                if (eventListener != null) eventListener.onRemoteSeekTo(positionMs);
+            } else {
+                seekTo(positionMs);
+            }
         } else if (ACTION_SET_EQ.equals(action)) {
             eqEnabled = intent.getBooleanExtra("enabled", false);
             float[] gains = intent.getFloatArrayExtra("gains");
@@ -249,18 +330,34 @@ public class MediaPlaybackService extends Service implements
         return START_NOT_STICKY;
     }
 
+    private void stopNativeMediaPlayerQuietly() {
+        progressHandler.removeCallbacks(progressRunnable);
+        if (mediaPlayer != null) {
+            try {
+                if (mediaPlayer.isPlaying()) mediaPlayer.stop();
+                mediaPlayer.reset();
+            } catch (Exception ignored) {}
+        }
+    }
+
     public void playUrl(String url) {
         if (url == null || url.isEmpty()) return;
+        Log.i(TAG, "Native MediaPlayer playUrl: " + url);
         requestAudioFocus();
         try {
             initMediaPlayer();
             mediaPlayer.reset();
             mediaPlayer.setDataSource(url);
             mediaPlayer.prepareAsync();
+            updateMediaMetadata();
+            updateNotification();
             fetchCoverBitmap(currentCoverUrl);
             acquireLocks();
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e(TAG, "playUrl exception: " + e.getMessage(), e);
+            if (eventListener != null) {
+                eventListener.onPlaybackError("播放器初始化失败: " + e.getMessage());
+            }
         }
     }
 
@@ -321,7 +418,6 @@ public class MediaPlaybackService extends Service implements
 
             for (short b = 0; b < numBands; b++) {
                 int centerHz = equalizer.getCenterFreq(b) / 1000;
-                // Map device center frequency to nearest of our 6 bands
                 int nearestIdx = 0;
                 double bestDiff = Double.MAX_VALUE;
                 for (int i = 0; i < EQ_BANDS_HZ.length; i++) {
@@ -337,7 +433,7 @@ public class MediaPlaybackService extends Service implements
                 equalizer.setBandLevel(b, targetMb);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.w(TAG, "applyEqualizer failed: " + e.getMessage());
         }
     }
 
@@ -350,7 +446,7 @@ public class MediaPlaybackService extends Service implements
                 mediaPlayer.setPlaybackParams(params);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.w(TAG, "applyPlaybackSpeed failed: " + e.getMessage());
         }
     }
 
@@ -361,11 +457,14 @@ public class MediaPlaybackService extends Service implements
             equalizer = null;
         }
         if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            mediaPlayer.release();
+            try {
+                mediaPlayer.stop();
+                mediaPlayer.release();
+            } catch (Exception ignored) {}
             mediaPlayer = null;
         }
         isPlaying = false;
+        webEngineActive = false;
         releaseLocks();
         abandonAudioFocus();
         if (mediaSession != null) {
@@ -377,6 +476,7 @@ public class MediaPlaybackService extends Service implements
 
     @Override
     public void onPrepared(MediaPlayer mp) {
+        Log.i(TAG, "MediaPlayer prepared, duration=" + mp.getDuration() + "ms");
         applyEqualizer();
         mp.start();
         if (playbackSpeed != 1.0f) {
@@ -405,9 +505,13 @@ public class MediaPlaybackService extends Service implements
 
     @Override
     public boolean onError(MediaPlayer mp, int what, int extra) {
+        Log.e(TAG, "MediaPlayer onError: what=" + what + " extra=" + extra);
         isPlaying = false;
         progressHandler.removeCallbacks(progressRunnable);
         releaseLocks();
+        if (eventListener != null) {
+            eventListener.onPlaybackError("音频播放失败 (what=" + what + ", extra=" + extra + ")");
+        }
         return true;
     }
 
@@ -418,17 +522,18 @@ public class MediaPlaybackService extends Service implements
                 PlaybackStateCompat.ACTION_SEEK_TO;
         mediaSession.setPlaybackState(new PlaybackStateCompat.Builder()
                 .setActions(actions)
-                .setState(state, position, 1.0f)
+                .setState(state, position, playbackSpeed)
                 .build());
     }
 
     private void updateMediaMetadata() {
         if (mediaSession == null) return;
+        long dur = webEngineActive ? webDurationMs : (mediaPlayer != null ? mediaPlayer.getDuration() : 0);
         MediaMetadataCompat.Builder builder = new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, mediaPlayer != null ? mediaPlayer.getDuration() : 0);
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle != null ? currentTitle : "MySpotify")
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist != null ? currentArtist : "")
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum != null ? currentAlbum : "")
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, Math.max(0, dur));
         if (currentCoverBitmap != null) {
             builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, currentCoverBitmap);
         }
@@ -436,7 +541,8 @@ public class MediaPlaybackService extends Service implements
     }
 
     private void fetchCoverBitmap(String urlStr) {
-        if (urlStr == null || urlStr.isEmpty()) return;
+        if (urlStr == null || urlStr.isEmpty() || urlStr.startsWith("data:")) return;
+        loadedCoverUrl = urlStr;
         coverExecutor.execute(() -> {
             try {
                 URL url = new URL(urlStr);
@@ -444,11 +550,14 @@ public class MediaPlaybackService extends Service implements
                 conn.setConnectTimeout(5000);
                 conn.setReadTimeout(5000);
                 try (InputStream is = conn.getInputStream()) {
-                    currentCoverBitmap = BitmapFactory.decodeStream(is);
-                    new Handler(Looper.getMainLooper()).post(() -> {
-                        updateMediaMetadata();
-                        updateNotification();
-                    });
+                    Bitmap bmp = BitmapFactory.decodeStream(is);
+                    if (bmp != null) {
+                        currentCoverBitmap = bmp;
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            updateMediaMetadata();
+                            updateNotification();
+                        });
+                    }
                 }
                 conn.disconnect();
             } catch (Exception ignored) {}
@@ -458,24 +567,18 @@ public class MediaPlaybackService extends Service implements
     private void updateNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent contentIntent = PendingIntent.getActivity(
-                this, 0, notificationIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
-        );
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, piFlags);
 
-        PendingIntent prevIntent = PendingIntent.getService(this, 1, new Intent(this, MediaPlaybackService.class).setAction(ACTION_PREV),
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
-        PendingIntent toggleIntent = PendingIntent.getService(this, 2, new Intent(this, MediaPlaybackService.class).setAction(ACTION_TOGGLE),
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
-        PendingIntent nextIntent = PendingIntent.getService(this, 3, new Intent(this, MediaPlaybackService.class).setAction(ACTION_NEXT),
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
-        PendingIntent stopIntent = PendingIntent.getService(this, 4, new Intent(this, MediaPlaybackService.class).setAction(ACTION_STOP),
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+        PendingIntent prevIntent = PendingIntent.getService(this, 1, new Intent(this, MediaPlaybackService.class).setAction(ACTION_PREV), piFlags);
+        PendingIntent toggleIntent = PendingIntent.getService(this, 2, new Intent(this, MediaPlaybackService.class).setAction(ACTION_TOGGLE), piFlags);
+        PendingIntent nextIntent = PendingIntent.getService(this, 3, new Intent(this, MediaPlaybackService.class).setAction(ACTION_NEXT), piFlags);
+        PendingIntent stopIntent = PendingIntent.getService(this, 4, new Intent(this, MediaPlaybackService.class).setAction(ACTION_STOP), piFlags);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle(currentTitle)
-                .setContentText(currentArtist)
-                .setSubText(currentAlbum)
+                .setContentTitle(currentTitle != null ? currentTitle : "MySpotify")
+                .setContentText(currentArtist != null ? currentArtist : "")
+                .setSubText(currentAlbum != null ? currentAlbum : "")
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentIntent(contentIntent)
                 .setDeleteIntent(stopIntent)
@@ -530,12 +633,18 @@ public class MediaPlaybackService extends Service implements
 
     @Override
     public void onAudioFocusChange(int focusChange) {
-        if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-            pause();
-        } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-            pause();
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+            if (webEngineActive) {
+                if (eventListener != null) eventListener.onRemoteTogglePlayPause(false);
+            } else {
+                pause();
+            }
         } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
-            resume();
+            if (webEngineActive) {
+                if (eventListener != null) eventListener.onRemoteTogglePlayPause(true);
+            } else {
+                resume();
+            }
         }
     }
 

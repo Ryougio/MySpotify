@@ -75,13 +75,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.42
-          name: "MySpotify Mobile Edition (v0.4.42 - Desktop v0.4.38 Sync + Instant Snapshot Cache + Smart Playlist Anti-Drop)"
+          tag_name: mobile-v0.4.43
+          name: "MySpotify Mobile Edition (v0.4.43 - Official Spotify Widevine EME Audio Engine + Bridge & ForegroundService Fix)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.42 桌面端无感同步与歌单稳连版)
-            - **桌面端同款本地持久化快照（0ms 秒开 + 后台无感同步）**：完整移植桌面端 `session.go`（`home.json` + `session.json`），冷启动瞬间立即渲染上次的个人头像、首页推荐橱窗、全部歌单/专辑/艺人/喜欢歌曲与上次播放曲目，后台静默刷新绝不闪屏清空，网络波动自动 15 秒后静默补齐。
-            - **彻底治好歌单加载 `connection closed` 断连**：针对 FlClash `tun0`（MTU 9000）导致的偶发分片断连，OkHttp 失败重试自动清空连接池、切换 HTTP/1.1 短连接，并在检测到本地 `127.0.0.1:7890` 混合端口时自动切换代理通道绕开 TUN 分片；同时新增歌单/专辑本地缓存（打开过的歌单 0ms 秒开 + 失败一键重试）。
-            - **同步上游作者 v0.4.38 全部更新**：新增设置页「交叉淡入淡出 0–12 秒」滑块（#48），持久化保留随机播放与循环状态（#47），恢复上次播放队列无缝续播。
+            ### MySpotify Android 客户端 (v0.4.43 官方 Widevine 原生流媒体播放引擎版)
+            - **彻底修复「歌加载出来了还是放不了」三大根因**：
+              1. **移植桌面端官方 Spotify Widevine EME + HLS.js 播放引擎**（完整对齐 `internal/spotify/media.go`、`mirrors.go`、`internal/player/web.go` + `player.html` + `hls.min.js`）：内置本地 `127.0.0.1` 媒体与 Widevine DRM 授权代理服务（支持 256k/128k 自动降级适配 Free 与 Premium 账号、CDN 多镜像自动切换、交叉淡入淡出 0-12 秒、倍速播放），彻底告别已失效跳转 `/404` 的网易云外链！
+              2. **修复 JS-Android 桥接方法名不匹配**：统一导出 `playSpotifyTrack` / `playAudio` / `pauseAudio` / `resumeAudio` / `setCrossfade`，消除点击歌曲后静默未触发原生播放的缺陷。
+              3. **修复 Android 14/15 前台播放服务启动时机与错误静默**：`MediaPlaybackService` 在 `onStartCommand` 立即启动前台通知并完整回传播放错误与锁屏控制。
+            - **访客模式与异常降级**：未登录或非 Spotify 曲目自动回退至全球可用的 Apple iTunes HTTPS 试听流，不再返回 404 或假音频。
+            - **网络异常诊断优化**：优化 `getServerTime` 快速回退，避免 `open.spotify.com` 握手重置拖慢同步，并在手动同步失败时清晰提示 FlClash Spotify 分流节点排查方向。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
