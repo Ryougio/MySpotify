@@ -82,15 +82,28 @@ public class SpotifyLoginActivity extends AppCompatActivity {
 
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
-            public void onTokenReceived(String tokenJson) {
+            public void onIdentityCaptured(String payloadJson) {
                 try {
-                    JSONObject j = new JSONObject(tokenJson);
-                    String accessToken = j.optString("accessToken", null);
-                    if (accessToken != null && !accessToken.isEmpty()) {
-                        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-                        prefs.edit().putString(KEY_ACCESS_TOKEN, accessToken).apply();
-                        completeLogin();
+                    JSONObject j = new JSONObject(payloadJson);
+                    SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                    SharedPreferences.Editor ed = prefs.edit();
+                    String ct = j.optString("clientToken", "");
+                    if (!ct.isEmpty()) {
+                        ed.putString(SpotifyApiClient.KEY_CLIENT_TOKEN, ct);
+                        ed.putLong(SpotifyApiClient.KEY_CLIENT_TOKEN_EXPIRES, System.currentTimeMillis() + 14L * 86400_000L);
                     }
+                    JSONObject tok = j.optJSONObject("token");
+                    if (tok != null) {
+                        String at = tok.optString("accessToken", "");
+                        boolean anon = tok.optBoolean("isAnonymous", true);
+                        long exp = tok.optLong("accessTokenExpirationTimestampMs", System.currentTimeMillis() + 1800_000L);
+                        if (!at.isEmpty() && !anon) {
+                            ed.putString(KEY_ACCESS_TOKEN, at);
+                            ed.putBoolean(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON, false);
+                            ed.putLong(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES, exp);
+                        }
+                    }
+                    ed.commit();
                 } catch (Exception ignored) {}
             }
         }, "SpotifyLoginCapture");
@@ -135,31 +148,51 @@ public class SpotifyLoginActivity extends AppCompatActivity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 checkCookies(url);
+                if (url != null && url.contains("open.spotify.com")) {
+                    injectCaptureJs(view);
+                }
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 checkCookies(url);
 
-                // Intercept web player token
                 if (url != null && url.contains("open.spotify.com")) {
-                    String js = "(() => {" +
-                            "  if (window.__vinyl && window.__vinyl.token) {" +
-                            "    window.SpotifyLoginCapture.onTokenReceived(JSON.stringify(window.__vinyl.token));" +
-                            "  }" +
-                            "})();";
-                    view.evaluateJavascript(js, null);
-
+                    injectCaptureJs(view);
                     CookieManager cm = CookieManager.getInstance();
                     String cookies = cm.getCookie("https://open.spotify.com");
                     if (cookies != null && cookies.contains("sp_dc=")) {
-                        handler.postDelayed(() -> completeLogin(), 800);
+                        // Give open.spotify.com up to 2.5s to also capture clientToken + accessToken
+                        handler.postDelayed(() -> {
+                            if (webView != null && !isFinished) {
+                                webView.evaluateJavascript("if(window.__vinyl && window.SpotifyLoginCapture) window.SpotifyLoginCapture.onIdentityCaptured(JSON.stringify(window.__vinyl));", null);
+                            }
+                        }, 1500);
+                        handler.postDelayed(SpotifyLoginActivity.this::completeLogin, 2500);
                     }
                 }
             }
         });
 
         webView.loadUrl(LOGIN_URL);
+    }
+
+    private void injectCaptureJs(WebView view) {
+        String js = "(() => {" +
+                "if (window.__vinylInstalled) return; window.__vinylInstalled = true;" +
+                "const v = (window.__vinyl = {});" +
+                "const wanted = /\\/api\\/token|clienttoken/;" +
+                "const notify = () => { try { if (window.SpotifyLoginCapture) window.SpotifyLoginCapture.onIdentityCaptured(JSON.stringify(v)); } catch(e){} };" +
+                "const keep = (u, t) => { try { const j = JSON.parse(t); if (/\\/api\\/token/.test(u) && j.accessToken) { v.token = j; notify(); } if (/clienttoken/.test(u) && j.granted_token) { v.clientToken = j.granted_token.token; notify(); } } catch(e){} };" +
+                "const f0 = window.fetch;" +
+                "window.fetch = function(input, init) {" +
+                "  const u = typeof input === 'string' ? input : (input && input.url) || String(input);" +
+                "  const p = f0.apply(this, arguments);" +
+                "  if (wanted.test(u)) p.then(r => r.clone().text()).then(t => keep(u, t)).catch(()=>{});" +
+                "  return p;" +
+                "};" +
+                "})();";
+        view.evaluateJavascript(js, null);
     }
 
     private void showManualCookieDialog() {

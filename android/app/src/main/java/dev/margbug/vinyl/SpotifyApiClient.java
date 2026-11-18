@@ -4,34 +4,50 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
+import okhttp3.ConnectionPool;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class SpotifyApiClient {
 
     private static final String TAG = "SpotifyApiClient";
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+    private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
     private static final ExecutorService executor = Executors.newCachedThreadPool();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private static volatile OkHttpClient cachedClient;
+    private static volatile String cachedProxyKey = "";
 
     private static final String[][] TOTP_SECRETS = {
             {",7/*F(\"rLJ2oxaKL^f+E1xvP@N", "61"},
@@ -47,22 +63,94 @@ public class SpotifyApiClient {
         }
     }
 
-    public static HttpURLConnection openConnection(URL url) throws Exception {
+    private static Proxy parseConfiguredProxy() {
+        if (appContext == null) return null;
+        SharedPreferences prefs = appContext.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        String proxyStr = prefs.getString("proxy", null);
+        if (proxyStr == null || proxyStr.trim().isEmpty()) return null;
+        String raw = proxyStr.trim();
+        Proxy.Type type = Proxy.Type.HTTP;
+        if (raw.toLowerCase(Locale.US).startsWith("socks")) {
+            type = Proxy.Type.SOCKS;
+        }
+        String clean = raw.replaceFirst("^(?i)(https?|socks5h?|socks4|socks)://", "");
+        if (clean.contains("/")) clean = clean.substring(0, clean.indexOf("/"));
+        String[] parts = clean.split(":");
+        if (parts.length == 2) {
+            try {
+                return new Proxy(type, new InetSocketAddress(parts[0], Integer.parseInt(parts[1])));
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private static synchronized OkHttpClient getHttpClient() {
+        String proxyKey = "";
         if (appContext != null) {
             SharedPreferences prefs = appContext.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
-            String proxyStr = prefs.getString("proxy", null);
-            if (proxyStr != null && !proxyStr.trim().isEmpty()) {
-                String clean = proxyStr.trim().replace("http://", "").replace("https://", "");
-                String[] parts = clean.split(":");
-                if (parts.length == 2) {
-                    try {
-                        String host = parts[0];
-                        int port = Integer.parseInt(parts[1]);
-                        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP, new java.net.InetSocketAddress(host, port));
-                        return (HttpURLConnection) url.openConnection(proxy);
-                    } catch (Exception ignored) {}
+            proxyKey = prefs.getString("proxy", "");
+            if (proxyKey == null) proxyKey = "";
+        }
+        if (cachedClient != null && proxyKey.equals(cachedProxyKey)) {
+            return cachedClient;
+        }
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+                .connectTimeout(12, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .connectionPool(new ConnectionPool(8, 90, TimeUnit.SECONDS));
+        Proxy p = parseConfiguredProxy();
+        if (p != null) {
+            builder.proxy(p);
+        }
+        cachedClient = builder.build();
+        cachedProxyKey = proxyKey;
+        return cachedClient;
+    }
+
+    private static class HttpResult {
+        final int code;
+        final String body;
+        HttpResult(int code, String body) {
+            this.code = code;
+            this.body = body;
+        }
+    }
+
+    /**
+     * Executes an OkHttp request with automatic retry on transient TLS / EOF connection resets
+     * (common on mobile VPN / Clash TUN nodes).
+     */
+    private static HttpResult executeWithRetry(Request request, int maxAttempts, int timeoutSec) throws IOException {
+        OkHttpClient client = getHttpClient();
+        if (timeoutSec > 0) {
+            client = client.newBuilder()
+                    .connectTimeout(timeoutSec, TimeUnit.SECONDS)
+                    .readTimeout(timeoutSec, TimeUnit.SECONDS)
+                    .build();
+        }
+        IOException lastEx = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try (Response resp = client.newCall(request).execute()) {
+                String body = resp.body() != null ? resp.body().string() : "";
+                return new HttpResult(resp.code(), body);
+            } catch (IOException e) {
+                lastEx = e;
+                android.util.Log.w(TAG, "HTTP attempt " + attempt + "/" + maxAttempts + " failed (" + request.url().host() + "): " + e.getMessage());
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(350L * attempt); } catch (InterruptedException ignored) {}
                 }
             }
+        }
+        throw lastEx != null ? lastEx : new IOException("Request failed");
+    }
+
+    public static HttpURLConnection openConnection(URL url) throws Exception {
+        Proxy p = parseConfiguredProxy();
+        if (p != null) {
+            return (HttpURLConnection) url.openConnection(p);
         }
         return (HttpURLConnection) url.openConnection();
     }
@@ -106,26 +194,24 @@ public class SpotifyApiClient {
 
     private static long getServerTime() {
         try {
-            URL url = new URL("https://open.spotify.com/api/server-time");
-            HttpURLConnection conn = openConnection(url);
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", USER_AGENT);
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
-            if (conn.getResponseCode() == 200) {
-                String body = readStream(conn.getInputStream());
-                JSONObject json = new JSONObject(body);
+            Request req = new Request.Builder()
+                    .url("https://open.spotify.com/api/server-time")
+                    .header("User-Agent", USER_AGENT)
+                    .get()
+                    .build();
+            HttpResult res = executeWithRetry(req, 2, 5);
+            if (res.code == 200) {
+                JSONObject json = new JSONObject(res.body);
                 long sec = json.optLong("serverTime", 0);
-                if (sec > 0) return sec * 1000;
+                if (sec > 0) return sec * 1000L;
             }
-            conn.disconnect();
         } catch (Exception ignored) {}
         return System.currentTimeMillis();
     }
 
     private static final String CLIENT_VERSION = "1.3.8.509.g26b6eac7300d";
-    private static final String KEY_CLIENT_TOKEN = "client_token";
-    private static final String KEY_CLIENT_TOKEN_EXPIRES = "client_token_expires";
+    public static final String KEY_CLIENT_TOKEN = "client_token";
+    public static final String KEY_CLIENT_TOKEN_EXPIRES = "client_token_expires";
     public static final String KEY_ACCESS_TOKEN_ANON = "access_token_is_anon";
     public static final String KEY_ACCESS_TOKEN_EXPIRES = "access_token_expires";
 
@@ -170,23 +256,17 @@ public class SpotifyApiClient {
             JSONObject root = new JSONObject();
             root.put("client_data", clientData);
 
-            URL url = new URL("https://clienttoken.spotify.com/v1/clienttoken");
-            HttpURLConnection conn = openConnection(url);
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("User-Agent", USER_AGENT);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
-            conn.setDoOutput(true);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(root.toString().getBytes(StandardCharsets.UTF_8));
-            }
-            int code = conn.getResponseCode();
-            if (code >= 200 && code < 300) {
-                String body = readStream(conn.getInputStream());
-                JSONObject res = new JSONObject(body);
-                JSONObject granted = res.optJSONObject("granted_token");
+            Request req = new Request.Builder()
+                    .url("https://clienttoken.spotify.com/v1/clienttoken")
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/json")
+                    .post(RequestBody.create(root.toString(), JSON_MEDIA))
+                    .build();
+
+            HttpResult res = executeWithRetry(req, 2, 6);
+            if (res.code >= 200 && res.code < 300) {
+                JSONObject json = new JSONObject(res.body);
+                JSONObject granted = json.optJSONObject("granted_token");
                 if (granted != null) {
                     String ct = granted.optString("token", "");
                     long expiresAfterSec = granted.optLong("expires_after_seconds", 86400);
@@ -195,14 +275,12 @@ public class SpotifyApiClient {
                                 .putString(KEY_CLIENT_TOKEN, ct)
                                 .putLong(KEY_CLIENT_TOKEN_EXPIRES, now + expiresAfterSec * 1000L)
                                 .apply();
-                        conn.disconnect();
                         return ct;
                     }
                 }
             }
-            conn.disconnect();
         } catch (Exception e) {
-            android.util.Log.w(TAG, "clienttoken fetch failed: " + e.getMessage());
+            android.util.Log.w(TAG, "clienttoken fetch failed (non-fatal): " + e.getMessage());
         }
         if (context != null) {
             SharedPreferences prefs = context.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
@@ -219,7 +297,7 @@ public class SpotifyApiClient {
 
     /**
      * Obtains an Access Token + Client Token from Spotify Web Player using the official TOTP signature
-     * exactly like the desktop Go client (internal/spotify/account.go + anon.go).
+     * over HTTP/2 OkHttp with automatic retry on transient TLS EOF resets.
      */
     public static void getAccessToken(Context context, ApiCallback callback) {
         executor.execute(() -> {
@@ -243,38 +321,32 @@ public class SpotifyApiClient {
                             "&totpServer=" + totpServer +
                             "&totpVer=" + version;
 
-                    URL url = new URL("https://open.spotify.com/api/token?" + query);
-                    HttpURLConnection conn = openConnection(url);
-                    conn.setRequestMethod("GET");
-                    conn.setRequestProperty("User-Agent", USER_AGENT);
-                    conn.setRequestProperty("Referer", "https://open.spotify.com/");
-                    conn.setRequestProperty("Accept", "application/json");
+                    Request.Builder rb = new Request.Builder()
+                            .url("https://open.spotify.com/api/token?" + query)
+                            .header("User-Agent", USER_AGENT)
+                            .header("Referer", "https://open.spotify.com/")
+                            .header("Accept", "application/json")
+                            .get();
 
                     if (hasSpDc) {
-                        conn.setRequestProperty("Cookie", "sp_dc=" + spDc.trim());
+                        rb.header("Cookie", "sp_dc=" + spDc.trim());
                     }
 
-                    conn.setConnectTimeout(10000);
-                    conn.setReadTimeout(10000);
-
-                    int code = conn.getResponseCode();
-                    if (code >= 200 && code < 300) {
-                        String body = readStream(conn.getInputStream());
-                        conn.disconnect();
-                        JSONObject json = new JSONObject(body);
+                    HttpResult res = executeWithRetry(rb.build(), 3, 12);
+                    if (res.code >= 200 && res.code < 300) {
+                        JSONObject json = new JSONObject(res.body);
                         String token = json.optString("accessToken", "");
                         String clientId = json.optString("clientId", "");
                         boolean isAnon = json.optBoolean("isAnonymous", !hasSpDc);
                         long expires = json.optLong("accessTokenExpirationTimestampMs", System.currentTimeMillis() + 1800_000L);
 
-                        // Also fetch & cache client-token (required by spclient & library endpoints)
+                        // Non-fatal client-token fetch (matches desktop anon.go)
                         String clientToken = getOrFetchClientToken(context, clientId);
                         if (clientToken != null && !clientToken.isEmpty()) {
                             json.put("clientToken", clientToken);
                         }
 
                         if (!token.isEmpty()) {
-                            // Never cache an anonymous token over a logged-in session
                             if (!hasSpDc || !isAnon) {
                                 prefs.edit()
                                         .putString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, token)
@@ -288,9 +360,7 @@ public class SpotifyApiClient {
                         mainHandler.post(() -> callback.onSuccess(finalBody));
                         return;
                     } else {
-                        String err = readStream(conn.getErrorStream());
-                        conn.disconnect();
-                        lastError = "Token fetch failed (" + code + ", ver=" + version + "): " + err;
+                        lastError = "Token fetch failed (" + res.code + ", ver=" + version + "): " + res.body;
                         android.util.Log.w(TAG, lastError);
                     }
                 }
@@ -304,7 +374,7 @@ public class SpotifyApiClient {
     }
 
     /**
-     * Executes a Pathfinder GraphQL query against Spotify Web Player endpoints.
+     * Executes a Pathfinder GraphQL query over HTTP/2 OkHttp with automatic retry on TLS resets.
      */
     public static void fetchPathfinder(String operationName, String hash, JSONObject variables, String token, ApiCallback callback) {
         executor.execute(() -> {
@@ -319,78 +389,64 @@ public class SpotifyApiClient {
                 ext.put("persistedQuery", persisted);
                 payload.put("extensions", ext);
 
-                URL url = new URL("https://api-partner.spotify.com/pathfinder/v2/query");
-                HttpURLConnection conn = openConnection(url);
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("User-Agent", USER_AGENT);
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-                conn.setRequestProperty("Content-Type", "application/json;charset=UTF-8");
-                conn.setRequestProperty("app-platform", "WebPlayer");
+                Request.Builder rb = new Request.Builder()
+                        .url("https://api-partner.spotify.com/pathfinder/v2/query")
+                        .header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/json")
+                        .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                        .header("app-platform", "WebPlayer")
+                        .post(RequestBody.create(payload.toString(), JSON_MEDIA));
+
                 if (token != null && !token.isEmpty()) {
-                    conn.setRequestProperty("Authorization", "Bearer " + token);
+                    rb.header("Authorization", "Bearer " + token);
                 }
                 String ct = getCachedClientToken();
                 if (ct != null && !ct.isEmpty()) {
-                    conn.setRequestProperty("client-token", ct);
+                    rb.header("client-token", ct);
                 }
 
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(15000);
-                conn.setDoOutput(true);
-
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
-                }
-
-                int code = conn.getResponseCode();
-                InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
-                String res = readStream(is);
-                if (code >= 200 && code < 300) {
-                    mainHandler.post(() -> callback.onSuccess(res));
+                HttpResult res = executeWithRetry(rb.build(), 3, 15);
+                if (res.code >= 200 && res.code < 300) {
+                    mainHandler.post(() -> callback.onSuccess(res.body));
                 } else {
-                    android.util.Log.w(TAG, "Pathfinder " + operationName + " HTTP " + code + ": " + res);
-                    mainHandler.post(() -> callback.onError(new Exception("Pathfinder " + code + ": " + res)));
+                    android.util.Log.w(TAG, "Pathfinder " + operationName + " HTTP " + res.code + ": " + res.body);
+                    mainHandler.post(() -> callback.onError(new Exception("Pathfinder " + res.code + ": " + res.body)));
                 }
-                conn.disconnect();
             } catch (Exception e) {
+                android.util.Log.e(TAG, "Pathfinder " + operationName + " exception: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e));
             }
         });
     }
 
     /**
-     * Executes a GET request against spclient.wg.spotify.com (e.g. recently-played).
+     * Executes a GET request against spclient.wg.spotify.com over HTTP/2 OkHttp with retry.
      */
     public static void fetchSpClient(String path, String token, ApiCallback callback) {
         executor.execute(() -> {
             try {
-                URL url = new URL("https://spclient.wg.spotify.com" + path);
-                HttpURLConnection conn = openConnection(url);
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("User-Agent", USER_AGENT);
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-                conn.setRequestProperty("app-platform", "WebPlayer");
+                Request.Builder rb = new Request.Builder()
+                        .url("https://spclient.wg.spotify.com" + path)
+                        .header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/json")
+                        .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                        .header("app-platform", "WebPlayer")
+                        .get();
+
                 if (token != null && !token.isEmpty()) {
-                    conn.setRequestProperty("Authorization", "Bearer " + token);
+                    rb.header("Authorization", "Bearer " + token);
                 }
                 String ct = getCachedClientToken();
                 if (ct != null && !ct.isEmpty()) {
-                    conn.setRequestProperty("client-token", ct);
+                    rb.header("client-token", ct);
                 }
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(15000);
 
-                int code = conn.getResponseCode();
-                InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
-                String res = readStream(is);
-                if (code >= 200 && code < 300) {
-                    mainHandler.post(() -> callback.onSuccess(res));
+                HttpResult res = executeWithRetry(rb.build(), 3, 15);
+                if (res.code >= 200 && res.code < 300) {
+                    mainHandler.post(() -> callback.onSuccess(res.body));
                 } else {
-                    mainHandler.post(() -> callback.onError(new Exception("spclient " + code + ": " + res)));
+                    mainHandler.post(() -> callback.onError(new Exception("spclient " + res.code + ": " + res.body)));
                 }
-                conn.disconnect();
             } catch (Exception e) {
                 mainHandler.post(() -> callback.onError(e));
             }

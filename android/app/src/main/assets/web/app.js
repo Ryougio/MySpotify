@@ -1439,7 +1439,6 @@
 
         if (!state.isLoggedIn) {
             renderLoggedOutUI();
-            // 即使未登录，也获取匿名访客 Token 加载真实的 Spotify 首页与分类！
             try {
                 await ensureToken(false);
                 loadHomeFeed(state.homeFacet);
@@ -1449,10 +1448,18 @@
             return;
         }
 
-        // 只要本地有 sp_dc 凭据，立刻把设置页切换为已登录状态（绝不误显示成未登录/自动退出）
+        if (state.isSyncing) {
+            if (showToast) Native.toast("同步正在进行中，请稍候...");
+            return;
+        }
+        state.isSyncing = true;
+
+        // 只要本地有 sp_dc 凭据，立刻把设置页切换为已登录状态
         document.getElementById("rowLogin").style.display = "none";
         document.getElementById("rowSync").style.display = "flex";
         document.getElementById("rowLogout").style.display = "flex";
+        const syncBtn = document.getElementById("btnActionSync");
+        if (syncBtn) syncBtn.textContent = "同步中...";
         if (!state.userProfile) {
             document.getElementById("settingsAccountName").textContent = "已登录，正在同步...";
             document.getElementById("settingsAccountTier").textContent = "Spotify 同步中";
@@ -1460,15 +1467,15 @@
 
         if (showToast) Native.toast("正在全量同步 Spotify 资料与歌单...");
 
-        try {
-            // 如果刚登录或当前持有的是匿名 Token，强制向 /api/token 换取正式用户 Token + client-token
-            await ensureToken(forceFreshToken || state.tokenIsAnon || !state.accessToken);
+        let anyError = null;
+        let syncedAny = false;
 
+        try {
+            // 优先使用有效非匿名 Token，必要时强制刷新
+            await ensureToken(forceFreshToken || state.tokenIsAnon || !state.accessToken);
             if (state.tokenIsAnon) {
-                // 再次强制刷新一次以防缓存竞争
                 await ensureToken(true);
             }
-
             if (state.tokenIsAnon) {
                 document.getElementById("settingsAccountName").textContent = "凭据已过期 (请重新登录)";
                 document.getElementById("settingsAccountTier").textContent = "Cookie 失效";
@@ -1476,29 +1483,65 @@
                 return;
             }
 
-            // 1. 获取用户资料
-            const profRes = await gql("profileAttributes", {});
-            const prof = profRes?.data?.me?.profile;
-            if (prof) {
-                state.userProfile = prof;
-                renderProfileUI(prof);
-            } else {
-                document.getElementById("settingsAccountName").textContent = "Spotify 已登录";
-                document.getElementById("settingsAccountTier").textContent = "Spotify 账号";
+            // 1. 获取用户资料（独立容错）
+            try {
+                const profRes = await gql("profileAttributes", {});
+                const prof = profRes?.data?.me?.profile;
+                if (prof) {
+                    state.userProfile = prof;
+                    renderProfileUI(prof);
+                    syncedAny = true;
+                }
+            } catch (e) {
+                console.warn("profileAttributes failed:", e);
+                anyError = anyError || e;
             }
 
-            // 2. 并行拉取首页 + 音乐库全量分页
-            const homePromise = loadHomeFeed(state.homeFacet);
-            await syncFullLibraryV3();
-            await syncAllLikedTracks();
-            await homePromise;
+            // 2. 并行拉取首页、音乐库全量、我喜欢的音乐（独立容错，不互相阻塞）
+            const tasks = await Promise.allSettled([
+                loadHomeFeed(state.homeFacet),
+                syncFullLibraryV3(),
+                syncAllLikedTracks()
+            ]);
+
+            if (tasks[1].status === "fulfilled" || tasks[2].status === "fulfilled" || tasks[0].status === "fulfilled") {
+                syncedAny = true;
+            }
+            for (const t of tasks) {
+                if (t.status === "rejected") {
+                    console.warn("Sync sub-task failed:", t.reason);
+                    anyError = anyError || t.reason;
+                }
+            }
+
+            if (!state.userProfile) {
+                if (syncedAny) {
+                    document.getElementById("settingsAccountName").textContent = "Spotify 已登录";
+                    document.getElementById("settingsAccountTier").textContent = "已同步";
+                } else {
+                    document.getElementById("settingsAccountName").textContent = "已登录 (同步失败，点击重试)";
+                    document.getElementById("settingsAccountTier").textContent = "网络或代理异常";
+                }
+            }
 
             if (showToast) {
-                Native.toast(`同步完成：${state.likedTracks.length} 首喜欢 · ${state.userPlaylists.length} 歌单 · ${state.userAlbums.length} 专辑 · ${state.userArtists.length} 艺人`);
+                if (syncedAny) {
+                    Native.toast(`同步完成：${state.likedTracks.length} 首喜欢 · ${state.userPlaylists.length} 歌单 · ${state.userAlbums.length} 专辑 · ${state.userArtists.length} 艺人`);
+                } else {
+                    const msg = (anyError && anyError.message) || "网络连接断开";
+                    Native.toast("同步失败：" + msg + "（建议切换代理节点后重试）");
+                }
             }
         } catch (err) {
             console.error("Sync failed:", err);
-            if (showToast) Native.toast("同步异常：" + (err.message || "请检查网络或代理"));
+            if (!state.userProfile) {
+                document.getElementById("settingsAccountName").textContent = "已登录 (同步失败，点击重试)";
+                document.getElementById("settingsAccountTier").textContent = "网络异常";
+            }
+            if (showToast) Native.toast("同步异常：" + (err.message || "请检查网络或代理节点"));
+        } finally {
+            state.isSyncing = false;
+            if (syncBtn) syncBtn.textContent = "立即同步";
         }
     }
 
