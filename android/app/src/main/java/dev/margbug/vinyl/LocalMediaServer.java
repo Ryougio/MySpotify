@@ -43,6 +43,7 @@ public class LocalMediaServer {
     public interface EventListener {
         void onPlayerEvent(int gen, String type, double timeSec, String msg, int seq);
         void onLicenseResponse(int gen, int httpCode);
+        default String onDiagCommand(String query) { return "unsupported"; }
     }
 
     public static class TrackSession {
@@ -248,6 +249,10 @@ public class LocalMediaServer {
                 handleWidevineForward(out, "POST", LICENSE_HOST + "/audio/license", reqBody, parseGenParam(query));
             } else if ("/event".equals(path) && "POST".equals(method)) {
                 handleEvent(out, reqBody);
+            } else if ("/diag".equals(path)
+                    && (appContext.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                String resp = eventListener != null ? eventListener.onDiagCommand(query) : "no_listener";
+                writeResponse(out, 200, "text/plain; charset=utf-8", (resp != null ? resp : "ok").getBytes(StandardCharsets.UTF_8), null);
             } else {
                 writeResponse(out, 404, "text/plain", "Not Found".getBytes(StandardCharsets.UTF_8), null);
             }
@@ -383,9 +388,9 @@ public class LocalMediaServer {
                     eventListener.onLicenseResponse(gen, res.code);
                 }
                 if (res.code != 200) {
-                    Log.w(TAG, "Widevine " + method + " " + targetUrl + " HTTP " + res.code + " len=" + res.body.length);
+                    Log.w(TAG, "Widevine " + method + " " + targetUrl + " HTTP " + res.code + " len=" + res.body.length + " hasClientToken=" + !id.clientToken.isEmpty());
                 } else {
-                    Log.i(TAG, "Widevine " + method + " OK (gen=" + gen + ", len=" + res.body.length + ")");
+                    Log.i(TAG, "Widevine " + method + " OK (gen=" + gen + ", len=" + res.body.length + ", hasClientToken=" + !id.clientToken.isEmpty() + ")");
                 }
                 writeResponse(out, res.code, "application/octet-stream", res.body, null);
                 return;

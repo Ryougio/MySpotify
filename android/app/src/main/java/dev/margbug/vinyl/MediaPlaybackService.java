@@ -25,12 +25,14 @@ import androidx.core.app.NotificationCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.Player;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.DecoderReuseEvaluation;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
@@ -39,6 +41,9 @@ import androidx.media3.exoplayer.drm.DummyExoMediaDrm;
 import androidx.media3.exoplayer.drm.FrameworkMediaDrm;
 import androidx.media3.exoplayer.drm.HttpMediaDrmCallback;
 import androidx.media3.exoplayer.hls.HlsMediaSource;
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -115,6 +120,10 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
     private volatile int activeGen = 0;
     private volatile int activeBitrate = 0;
     private volatile boolean downgradingNow = false;
+    private volatile boolean diagForceL3 = false;
+    private volatile boolean diagForceInproc = false;
+    private volatile boolean diagPrivacyOff = false;
+    private volatile boolean diagPreferCbcs = false;
     private final Set<String> downgradedUris = ConcurrentHashMap.newKeySet();
     private final AtomicInteger playRequestSeq = new AtomicInteger(0);
 
@@ -167,8 +176,28 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
 
     private void initExoPlayer() {
         if (exoPlayer != null) return;
+        MediaCodecSelector codecSelector = (mimeType, requiresSecureDecoder, requiresTunnelingDecoder) -> {
+            java.util.List<MediaCodecInfo> list = new java.util.ArrayList<>(
+                    MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+            );
+            StringBuilder names = new StringBuilder();
+            for (MediaCodecInfo info : list) {
+                if (names.length() > 0) names.append(",");
+                names.append(info.name);
+            }
+            Log.i(TAG, "MediaCodecSelector mime=" + mimeType + " secure=" + requiresSecureDecoder + " inproc=" + diagForceInproc + " decoders=[" + names + "]");
+            if (diagForceInproc && MimeTypes.AUDIO_AAC.equals(mimeType)) {
+                list.sort((a, b) -> {
+                    boolean aIn = a.name != null && a.name.contains("inproc");
+                    boolean bIn = b.name != null && b.name.contains("inproc");
+                    return Boolean.compare(bIn, aIn);
+                });
+            }
+            return list;
+        };
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-                .setEnableDecoderFallback(true);
+                .setEnableDecoderFallback(true)
+                .setMediaCodecSelector(codecSelector);
         exoPlayer = new ExoPlayer.Builder(this, renderersFactory).build();
         AudioAttributes attrs = new AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -191,6 +220,16 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
             @Override
             public void onDrmSessionManagerError(EventTime eventTime, Exception error) {
                 Log.e(TAG, "Analytics onDrmSessionManagerError: " + error.getMessage(), error);
+            }
+            @Override
+            public void onAudioInputFormatChanged(EventTime eventTime, Format format, @Nullable DecoderReuseEvaluation decoderReuseEvaluation) {
+                String drmInfo = format.drmInitData != null
+                        ? ("scheme=" + format.drmInitData.schemeType + " count=" + format.drmInitData.schemeDataCount)
+                        : "none";
+                Log.i(TAG, "Analytics onAudioInputFormatChanged: mime=" + format.sampleMimeType
+                        + " sr=" + format.sampleRate + " ch=" + format.channelCount
+                        + " csd=" + (format.initializationData != null ? format.initializationData.size() : 0)
+                        + " drm=(" + drmInfo + ")");
             }
             @Override
             public void onAudioDecoderInitialized(EventTime eventTime, String decoderName, long initializedTimestampMs, long initializationDurationMs) {
@@ -338,8 +377,8 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
         boolean validSpotifyUri = currentUri.startsWith("spotify:track:") || currentUri.startsWith("spotify:episode:");
         if (isLoggedIn() && validSpotifyUri && localServer != null && localServer.getPort() > 0) {
             boolean forceLowest = accountFreeOnly || downgradedUris.contains(currentUri);
-            Log.i(TAG, "Resolving Spotify HLS for ExoPlayer: uri=" + currentUri + " forceLowest=" + forceLowest);
-            SpotifyApiClient.resolveSpotifyMedia(this, currentUri, !forceLowest, forceLowest, new SpotifyApiClient.MediaCallback() {
+            Log.i(TAG, "Resolving Spotify HLS for ExoPlayer: uri=" + currentUri + " forceLowest=" + forceLowest + " cbcs=" + diagPreferCbcs);
+            SpotifyApiClient.resolveSpotifyMedia(this, currentUri, !forceLowest, forceLowest, diagPreferCbcs, new SpotifyApiClient.MediaCallback() {
                 @Override
                 public void onSuccess(SpotifyApiClient.SpotifyMedia media) {
                     if (reqId != playRequestSeq.get()) return;
@@ -427,8 +466,16 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
                             try {
                                 secLevel = drm.getPropertyString("securityLevel");
                             } catch (Exception ignored) {}
-                            Log.i(TAG, "FrameworkMediaDrm native securityLevel=" + secLevel);
-                            if (widevineCert != null && widevineCert.length > 0) {
+                            if (diagForceL3) {
+                                try {
+                                    drm.setPropertyString("securityLevel", "L3");
+                                    secLevel = "L3(forced)";
+                                } catch (Exception e) {
+                                    Log.w(TAG, "Force L3 failed: " + e.getMessage());
+                                }
+                            }
+                            Log.i(TAG, "FrameworkMediaDrm securityLevel=" + secLevel + " privacyOff=" + diagPrivacyOff);
+                            if (!diagPrivacyOff && widevineCert != null && widevineCert.length > 0) {
                                 try {
                                     drm.setPropertyString("privacyMode", "enable");
                                     drm.setPropertyByteArray("serviceCertificate", widevineCert);
@@ -650,6 +697,85 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
     @Override
     public void onPlayerEvent(int gen, String type, double timeSec, String msg, int seq) {
         // Unused in native ExoPlayer mode
+    }
+
+    @Override
+    public String onDiagCommand(String query) {
+        java.util.Map<String, String> params = new java.util.HashMap<>();
+        if (query != null && !query.isEmpty()) {
+            for (String kv : query.split("&")) {
+                int eq = kv.indexOf('=');
+                if (eq > 0) {
+                    params.put(kv.substring(0, eq), kv.substring(eq + 1));
+                }
+            }
+        }
+        String cmd = params.getOrDefault("cmd", "status");
+        if ("play".equals(cmd)) {
+            diagPreferCbcs = "1".equals(params.get("cbcs"));
+            diagForceL3 = "1".equals(params.get("l3"));
+            diagForceInproc = "1".equals(params.get("inproc"));
+            diagPrivacyOff = "0".equals(params.get("privacy"));
+            String uri = params.getOrDefault("uri", "spotify:track:4x1hB3Yg01Aq6J6q0deS9M");
+            mainHandler.post(() -> {
+                if (exoPlayer != null) {
+                    try { exoPlayer.release(); } catch (Exception ignored) {}
+                    exoPlayer = null;
+                }
+                playSpotifyTrack(uri, "DiagTrack", "Diag", "", "", 271000);
+            });
+            return "playing uri=" + uri + " cbcs=" + diagPreferCbcs + " l3=" + diagForceL3 + " inproc=" + diagForceInproc + " privacyOff=" + diagPrivacyOff;
+        } else if ("shaka".equals(cmd)) {
+            diagForceL3 = "1".equals(params.get("l3"));
+            diagForceInproc = "1".equals(params.get("inproc"));
+            mainHandler.post(() -> {
+                if (exoPlayer != null) {
+                    try { exoPlayer.release(); } catch (Exception ignored) {}
+                    exoPlayer = null;
+                }
+                initExoPlayer();
+                DefaultHttpDataSource.Factory hf = new DefaultHttpDataSource.Factory()
+                        .setConnectTimeoutMs(15_000)
+                        .setReadTimeoutMs(20_000)
+                        .setAllowCrossProtocolRedirects(true);
+                HttpMediaDrmCallback cb = new HttpMediaDrmCallback("https://cwip-shaka-proxy.appspot.com/no_auth", hf);
+                DefaultDrmSessionManager dsm = new DefaultDrmSessionManager.Builder()
+                        .setUuidAndExoMediaDrmProvider(C.WIDEVINE_UUID, uuid -> {
+                            try {
+                                FrameworkMediaDrm drm = FrameworkMediaDrm.newInstance(uuid);
+                                if (diagForceL3) drm.setPropertyString("securityLevel", "L3");
+                                Log.i(TAG, "Shaka DRM secLevel=" + drm.getPropertyString("securityLevel"));
+                                return drm;
+                            } catch (Exception e) {
+                                return new DummyExoMediaDrm();
+                            }
+                        })
+                        .setPlayClearSamplesWithoutKeys(false)
+                        .build(cb);
+                MediaItem item = new MediaItem.Builder()
+                        .setUri("https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/playlist_a-eng-0128k-aac-2c.mp4.m3u8")
+                        .setMimeType(MimeTypes.APPLICATION_M3U8)
+                        .build();
+                HlsMediaSource src = new HlsMediaSource.Factory(hf)
+                        .setDrmSessionManagerProvider(m -> dsm)
+                        .createMediaSource(item);
+                exoPlayer.setMediaSource(src);
+                exoPlayer.prepare();
+                exoPlayer.setPlayWhenReady(true);
+            });
+            return "playing shaka l3=" + diagForceL3 + " inproc=" + diagForceInproc;
+        } else if ("seek".equals(cmd)) {
+            int ms = 15000;
+            try { ms = Integer.parseInt(params.getOrDefault("ms", "15000")); } catch (Exception ignored) {}
+            final int targetMs = ms;
+            mainHandler.post(() -> seekTo(targetMs));
+            return "seeking to " + targetMs;
+        } else if ("pause".equals(cmd)) {
+            mainHandler.post(this::pause);
+            return "paused";
+        }
+        return "playing=" + isPlaying + " dur=" + currentDurationMs + " gen=" + activeGen
+                + " cbcs=" + diagPreferCbcs + " l3=" + diagForceL3 + " inproc=" + diagForceInproc + " privacyOff=" + diagPrivacyOff;
     }
 
     @Override

@@ -45,7 +45,7 @@ public class SpotifyApiClient {
 
     private static final String TAG = "SpotifyApiClient";
     public static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
-    private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
+    private static final MediaType JSON_MEDIA = MediaType.parse("application/json");
     private static final ExecutorService executor = Executors.newCachedThreadPool();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final java.util.Map<String, MirrorEntry> mirrorCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -409,10 +409,11 @@ public class SpotifyApiClient {
                     .url("https://clienttoken.spotify.com/v1/clienttoken")
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "application/json")
-                    .post(RequestBody.create(root.toString(), JSON_MEDIA))
+                    .post(RequestBody.create(root.toString().getBytes(StandardCharsets.UTF_8), JSON_MEDIA))
                     .build();
 
-            HttpResult res = executeWithRetry(req, 2, 6);
+            HttpResult res = executeWithRetry(req, 2, 8);
+            android.util.Log.i(TAG, "clienttoken HTTP " + res.code + " len=" + (res.body != null ? res.body.length() : 0));
             if (res.code >= 200 && res.code < 300) {
                 JSONObject json = new JSONObject(res.body);
                 JSONObject granted = json.optJSONObject("granted_token");
@@ -424,9 +425,12 @@ public class SpotifyApiClient {
                                 .putString(KEY_CLIENT_TOKEN, ct)
                                 .putLong(KEY_CLIENT_TOKEN_EXPIRES, now + expiresAfterSec * 1000L)
                                 .apply();
+                        android.util.Log.i(TAG, "clienttoken granted (len=" + ct.length() + ")");
                         return ct;
                     }
                 }
+            } else {
+                android.util.Log.w(TAG, "clienttoken rejected HTTP " + res.code + ": " + res.body);
             }
         } catch (Exception e) {
             android.util.Log.w(TAG, "clienttoken fetch failed (non-fatal): " + e.getMessage());
@@ -489,6 +493,9 @@ public class SpotifyApiClient {
                         boolean isAnon = json.optBoolean("isAnonymous", !hasSpDc);
                         long expires = json.optLong("accessTokenExpirationTimestampMs", System.currentTimeMillis() + 1800_000L);
 
+                        if (clientId != null && !clientId.isEmpty()) {
+                            prefs.edit().putString("spotify_client_id", clientId).apply();
+                        }
                         // Non-fatal client-token fetch (matches desktop anon.go)
                         String clientToken = getOrFetchClientToken(context, clientId);
                         if (clientToken != null && !clientToken.isEmpty()) {
@@ -621,7 +628,17 @@ public class SpotifyApiClient {
             if (cachedToken != null && !cachedToken.isEmpty()
                     && (!hasSpDc || !isAnon)
                     && (expires == 0 || System.currentTimeMillis() < expires - 60_000L)) {
-                return new Identity(cachedToken, ct != null ? ct : "", isAnon);
+                if (ct == null || ct.isEmpty()) {
+                    String savedClientId = prefs.getString("spotify_client_id", "");
+                    if (savedClientId != null && !savedClientId.isEmpty()) {
+                        ct = getOrFetchClientToken(ctx, savedClientId);
+                    }
+                }
+                if (ct != null && !ct.isEmpty()) {
+                    return new Identity(cachedToken, ct, isAnon);
+                }
+                // client_token missing (e.g. upgraded from pre-v0.4.49): fall through once to obtain clientId + client_token
+                android.util.Log.i(TAG, "getIdentitySync: client_token missing, refreshing token+clienttoken");
             }
         }
 
@@ -656,6 +673,9 @@ public class SpotifyApiClient {
                     JSONObject json = new JSONObject(res.body);
                     String token = json.optString("accessToken", "");
                     String clientId = json.optString("clientId", "");
+                    if (!clientId.isEmpty()) {
+                        prefs.edit().putString("spotify_client_id", clientId).apply();
+                    }
                     boolean isAnon = json.optBoolean("isAnonymous", !hasSpDc);
                     long expires = json.optLong("accessTokenExpirationTimestampMs", System.currentTimeMillis() + 1800_000L);
                     String clientToken = getOrFetchClientToken(ctx, clientId);
@@ -709,13 +729,19 @@ public class SpotifyApiClient {
      * Resolves an official Spotify track or podcast episode into an HLS Widevine manifest (or external file URL).
      */
     public static void resolveSpotifyMedia(Context context, String uri, boolean preferHighQuality, boolean forceLowestBitrate, MediaCallback callback) {
+        resolveSpotifyMedia(context, uri, preferHighQuality, forceLowestBitrate, false, callback);
+    }
+
+    public static void resolveSpotifyMedia(Context context, String uri, boolean preferHighQuality, boolean forceLowestBitrate, boolean preferCbcs, MediaCallback callback) {
         executor.execute(() -> {
             try {
                 if (uri == null || uri.trim().isEmpty()) {
                     throw new IOException("Empty Spotify URI");
                 }
                 boolean isEpisode = uri.startsWith("spotify:episode:");
-                String query = "manifestFileFormat=file_ids_mp4&manifestFileFormat=file_ids_mp4_dual";
+                String query = preferCbcs
+                        ? "manifestFileFormat=file_ids_mp4_cbcs&manifestFileFormat=file_ids_mp4&manifestFileFormat=file_ids_mp4_dual"
+                        : "manifestFileFormat=file_ids_mp4&manifestFileFormat=file_ids_mp4_dual";
                 if (isEpisode) {
                     query += "&manifestFileFormat=file_urls_external";
                 }
@@ -760,7 +786,10 @@ public class SpotifyApiClient {
                     int bitrate;
                 }
                 List<FileCand> candidates = new ArrayList<>();
-                String[] formats = new String[]{"file_ids_mp4", "file_ids_mp4_dual"};
+                String[] formats = preferCbcs
+                        ? new String[]{"file_ids_mp4_cbcs", "file_ids_mp4", "file_ids_mp4_dual"}
+                        : new String[]{"file_ids_mp4", "file_ids_mp4_dual"};
+                String matchedFmt = "";
                 for (String fmt : formats) {
                     JSONArray arr = manifestObj.optJSONArray(fmt);
                     if (arr == null) continue;
@@ -776,7 +805,10 @@ public class SpotifyApiClient {
                             candidates.add(c);
                         }
                     }
-                    if (!candidates.isEmpty()) break;
+                    if (!candidates.isEmpty()) {
+                        matchedFmt = fmt;
+                        break;
+                    }
                 }
 
                 // Podcast external audio fallback
@@ -814,7 +846,7 @@ public class SpotifyApiClient {
                     throw new IOException("sneaktables HLS HTTP " + hlsRes.code);
                 }
                 String m3u8 = new String(hlsRes.body, StandardCharsets.UTF_8);
-                android.util.Log.i(TAG, "Resolved Spotify HLS: uri=" + uri + " fileId=" + chosen.fileId + " bitrate=" + chosen.bitrate + " len=" + m3u8.length());
+                android.util.Log.i(TAG, "Resolved Spotify HLS: uri=" + uri + " fmt=" + matchedFmt + " fileId=" + chosen.fileId + " bitrate=" + chosen.bitrate + " len=" + m3u8.length());
                 SpotifyMedia media = new SpotifyMedia(m3u8, "", chosen.fileId, durationMs, chosen.bitrate);
                 mainHandler.post(() -> callback.onSuccess(media));
             } catch (Exception e) {
