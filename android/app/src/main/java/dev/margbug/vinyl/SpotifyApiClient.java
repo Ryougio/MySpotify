@@ -123,70 +123,181 @@ public class SpotifyApiClient {
         return System.currentTimeMillis();
     }
 
+    private static final String CLIENT_VERSION = "1.3.8.509.g26b6eac7300d";
+    private static final String KEY_CLIENT_TOKEN = "client_token";
+    private static final String KEY_CLIENT_TOKEN_EXPIRES = "client_token_expires";
+    public static final String KEY_ACCESS_TOKEN_ANON = "access_token_is_anon";
+    public static final String KEY_ACCESS_TOKEN_EXPIRES = "access_token_expires";
+
+    private static String getOrFetchClientToken(Context context, String clientId) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+            String cached = prefs.getString(KEY_CLIENT_TOKEN, null);
+            long exp = prefs.getLong(KEY_CLIENT_TOKEN_EXPIRES, 0);
+            long now = System.currentTimeMillis();
+            if (cached != null && !cached.isEmpty() && now < exp - 300_000L) {
+                return cached;
+            }
+            if (clientId == null || clientId.isEmpty()) {
+                return cached != null ? cached : "";
+            }
+
+            String deviceId = prefs.getString("spotify_device_id", null);
+            if (deviceId == null || deviceId.isEmpty()) {
+                byte[] b = new byte[16];
+                new java.security.SecureRandom().nextBytes(b);
+                StringBuilder hex = new StringBuilder();
+                for (byte x : b) hex.append(String.format(Locale.US, "%02x", x));
+                deviceId = hex.toString();
+                prefs.edit().putString("spotify_device_id", deviceId).apply();
+            }
+
+            JSONObject jsSdk = new JSONObject();
+            jsSdk.put("device_brand", "unknown");
+            jsSdk.put("device_model", "unknown");
+            jsSdk.put("os", "macos");
+            jsSdk.put("os_version", "10.15.7");
+            jsSdk.put("container_version", "unknown");
+            jsSdk.put("device_id", deviceId);
+            jsSdk.put("device_type", "computer");
+            jsSdk.put("platform_identifier", "web_player");
+
+            JSONObject clientData = new JSONObject();
+            clientData.put("client_version", CLIENT_VERSION);
+            clientData.put("client_id", clientId);
+            clientData.put("js_sdk_data", jsSdk);
+
+            JSONObject root = new JSONObject();
+            root.put("client_data", clientData);
+
+            URL url = new URL("https://clienttoken.spotify.com/v1/clienttoken");
+            HttpURLConnection conn = openConnection(url);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("User-Agent", USER_AGENT);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setDoOutput(true);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(root.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            int code = conn.getResponseCode();
+            if (code >= 200 && code < 300) {
+                String body = readStream(conn.getInputStream());
+                JSONObject res = new JSONObject(body);
+                JSONObject granted = res.optJSONObject("granted_token");
+                if (granted != null) {
+                    String ct = granted.optString("token", "");
+                    long expiresAfterSec = granted.optLong("expires_after_seconds", 86400);
+                    if (!ct.isEmpty()) {
+                        prefs.edit()
+                                .putString(KEY_CLIENT_TOKEN, ct)
+                                .putLong(KEY_CLIENT_TOKEN_EXPIRES, now + expiresAfterSec * 1000L)
+                                .apply();
+                        conn.disconnect();
+                        return ct;
+                    }
+                }
+            }
+            conn.disconnect();
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "clienttoken fetch failed: " + e.getMessage());
+        }
+        if (context != null) {
+            SharedPreferences prefs = context.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+            return prefs.getString(KEY_CLIENT_TOKEN, "");
+        }
+        return "";
+    }
+
+    private static String getCachedClientToken() {
+        if (appContext == null) return "";
+        SharedPreferences prefs = appContext.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getString(KEY_CLIENT_TOKEN, "");
+    }
+
     /**
-     * Obtains an Access Token from Spotify Web Player using the official TOTP signature
-     * exactly like the desktop Go client.
+     * Obtains an Access Token + Client Token from Spotify Web Player using the official TOTP signature
+     * exactly like the desktop Go client (internal/spotify/account.go + anon.go).
      */
     public static void getAccessToken(Context context, ApiCallback callback) {
         executor.execute(() -> {
             try {
                 SharedPreferences prefs = context.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
                 String spDc = prefs.getString(SpotifyLoginActivity.KEY_SP_DC, null);
-                String savedCookies = prefs.getString(SpotifyLoginActivity.KEY_ALL_COOKIES, null);
+                boolean hasSpDc = spDc != null && !spDc.trim().isEmpty();
 
                 long nowMs = System.currentTimeMillis();
                 long serverTimeMs = getServerTime();
 
-                byte[] key = unmaskTotpSecret(TOTP_SECRETS[0][0]);
-                int version = Integer.parseInt(TOTP_SECRETS[0][1]);
-                String totpNow = computeTotp(key, nowMs);
-                String totpServer = computeTotp(key, serverTimeMs);
+                String lastError = "Token fetch failed";
+                for (String[] secretPair : TOTP_SECRETS) {
+                    byte[] key = unmaskTotpSecret(secretPair[0]);
+                    int version = Integer.parseInt(secretPair[1]);
+                    String totpNow = computeTotp(key, nowMs);
+                    String totpServer = computeTotp(key, serverTimeMs);
 
-                String query = "reason=init&productType=web_player" +
-                        "&totp=" + totpNow +
-                        "&totpServer=" + totpServer +
-                        "&totpVer=" + version;
+                    String query = "reason=init&productType=web_player" +
+                            "&totp=" + totpNow +
+                            "&totpServer=" + totpServer +
+                            "&totpVer=" + version;
 
-                URL url = new URL("https://open.spotify.com/api/token?" + query);
-                HttpURLConnection conn = openConnection(url);
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("User-Agent", USER_AGENT);
-                conn.setRequestProperty("Referer", "https://open.spotify.com/");
-                conn.setRequestProperty("Accept", "application/json");
+                    URL url = new URL("https://open.spotify.com/api/token?" + query);
+                    HttpURLConnection conn = openConnection(url);
+                    conn.setRequestMethod("GET");
+                    conn.setRequestProperty("User-Agent", USER_AGENT);
+                    conn.setRequestProperty("Referer", "https://open.spotify.com/");
+                    conn.setRequestProperty("Accept", "application/json");
 
-                StringBuilder cookieHeader = new StringBuilder();
-                if (savedCookies != null && !savedCookies.isEmpty()) {
-                    cookieHeader.append(savedCookies);
-                }
-                if (spDc != null && !spDc.isEmpty() && !cookieHeader.toString().contains("sp_dc=")) {
-                    if (cookieHeader.length() > 0) cookieHeader.append("; ");
-                    cookieHeader.append("sp_dc=").append(spDc);
-                }
+                    if (hasSpDc) {
+                        conn.setRequestProperty("Cookie", "sp_dc=" + spDc.trim());
+                    }
 
-                if (cookieHeader.length() > 0) {
-                    conn.setRequestProperty("Cookie", cookieHeader.toString());
-                }
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(10000);
 
-                conn.setConnectTimeout(10000);
-                conn.setReadTimeout(10000);
-
-                int code = conn.getResponseCode();
-                if (code >= 200 && code < 300) {
-                    String body = readStream(conn.getInputStream());
-                    try {
+                    int code = conn.getResponseCode();
+                    if (code >= 200 && code < 300) {
+                        String body = readStream(conn.getInputStream());
+                        conn.disconnect();
                         JSONObject json = new JSONObject(body);
-                        String token = json.optString("accessToken", null);
-                        if (token != null && !token.isEmpty()) {
-                            prefs.edit().putString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, token).apply();
+                        String token = json.optString("accessToken", "");
+                        String clientId = json.optString("clientId", "");
+                        boolean isAnon = json.optBoolean("isAnonymous", !hasSpDc);
+                        long expires = json.optLong("accessTokenExpirationTimestampMs", System.currentTimeMillis() + 1800_000L);
+
+                        // Also fetch & cache client-token (required by spclient & library endpoints)
+                        String clientToken = getOrFetchClientToken(context, clientId);
+                        if (clientToken != null && !clientToken.isEmpty()) {
+                            json.put("clientToken", clientToken);
                         }
-                    } catch (Exception ignored) {}
-                    mainHandler.post(() -> callback.onSuccess(body));
-                } else {
-                    String err = readStream(conn.getErrorStream());
-                    mainHandler.post(() -> callback.onError(new Exception("Token fetch failed (" + code + "): " + err)));
+
+                        if (!token.isEmpty()) {
+                            // Never cache an anonymous token over a logged-in session
+                            if (!hasSpDc || !isAnon) {
+                                prefs.edit()
+                                        .putString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, token)
+                                        .putBoolean(KEY_ACCESS_TOKEN_ANON, isAnon)
+                                        .putLong(KEY_ACCESS_TOKEN_EXPIRES, expires)
+                                        .commit();
+                            }
+                        }
+                        android.util.Log.d(TAG, "getAccessToken OK: hasSpDc=" + hasSpDc + " isAnon=" + isAnon + " hasClientToken=" + (!clientToken.isEmpty()));
+                        String finalBody = json.toString();
+                        mainHandler.post(() -> callback.onSuccess(finalBody));
+                        return;
+                    } else {
+                        String err = readStream(conn.getErrorStream());
+                        conn.disconnect();
+                        lastError = "Token fetch failed (" + code + ", ver=" + version + "): " + err;
+                        android.util.Log.w(TAG, lastError);
+                    }
                 }
-                conn.disconnect();
+                final String finalErr = lastError;
+                mainHandler.post(() -> callback.onError(new Exception(finalErr)));
             } catch (Exception e) {
+                android.util.Log.e(TAG, "getAccessToken exception", e);
                 mainHandler.post(() -> callback.onError(e));
             }
         });
@@ -219,6 +330,10 @@ public class SpotifyApiClient {
                 if (token != null && !token.isEmpty()) {
                     conn.setRequestProperty("Authorization", "Bearer " + token);
                 }
+                String ct = getCachedClientToken();
+                if (ct != null && !ct.isEmpty()) {
+                    conn.setRequestProperty("client-token", ct);
+                }
 
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(15000);
@@ -234,6 +349,7 @@ public class SpotifyApiClient {
                 if (code >= 200 && code < 300) {
                     mainHandler.post(() -> callback.onSuccess(res));
                 } else {
+                    android.util.Log.w(TAG, "Pathfinder " + operationName + " HTTP " + code + ": " + res);
                     mainHandler.post(() -> callback.onError(new Exception("Pathfinder " + code + ": " + res)));
                 }
                 conn.disconnect();
@@ -258,6 +374,10 @@ public class SpotifyApiClient {
                 conn.setRequestProperty("app-platform", "WebPlayer");
                 if (token != null && !token.isEmpty()) {
                     conn.setRequestProperty("Authorization", "Bearer " + token);
+                }
+                String ct = getCachedClientToken();
+                if (ct != null && !ct.isEmpty()) {
+                    conn.setRequestProperty("client-token", ct);
                 }
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(15000);

@@ -189,6 +189,7 @@
                         const data = JSON.parse(resStr);
                         if (data && data.accessToken) {
                             state.accessToken = data.accessToken;
+                            state.tokenIsAnon = Boolean(data.isAnonymous);
                             resolve(data.accessToken);
                         } else {
                             reject(new Error("Token 返回异常"));
@@ -1432,7 +1433,7 @@
     // =========================================================================
     // 12. 完整同步音乐库与全量分页 (修复问题3 & 问题6：歌曲不全、专辑/艺人无反应)
     // =========================================================================
-    async function syncSpotifyData(showToast = false) {
+    async function syncSpotifyData(showToast = false, forceFreshToken = false) {
         const status = Native.getLoginStatus();
         state.isLoggedIn = Boolean(status.isLoggedIn);
 
@@ -1448,10 +1449,32 @@
             return;
         }
 
+        // 只要本地有 sp_dc 凭据，立刻把设置页切换为已登录状态（绝不误显示成未登录/自动退出）
+        document.getElementById("rowLogin").style.display = "none";
+        document.getElementById("rowSync").style.display = "flex";
+        document.getElementById("rowLogout").style.display = "flex";
+        if (!state.userProfile) {
+            document.getElementById("settingsAccountName").textContent = "已登录，正在同步...";
+            document.getElementById("settingsAccountTier").textContent = "Spotify 同步中";
+        }
+
         if (showToast) Native.toast("正在全量同步 Spotify 资料与歌单...");
 
         try {
-            await ensureToken(false);
+            // 如果刚登录或当前持有的是匿名 Token，强制向 /api/token 换取正式用户 Token + client-token
+            await ensureToken(forceFreshToken || state.tokenIsAnon || !state.accessToken);
+
+            if (state.tokenIsAnon) {
+                // 再次强制刷新一次以防缓存竞争
+                await ensureToken(true);
+            }
+
+            if (state.tokenIsAnon) {
+                document.getElementById("settingsAccountName").textContent = "凭据已过期 (请重新登录)";
+                document.getElementById("settingsAccountTier").textContent = "Cookie 失效";
+                if (showToast) Native.toast("sp_dc Cookie 已失效，请重新登录或重新复制有效的 sp_dc");
+                return;
+            }
 
             // 1. 获取用户资料
             const profRes = await gql("profileAttributes", {});
@@ -1459,6 +1482,9 @@
             if (prof) {
                 state.userProfile = prof;
                 renderProfileUI(prof);
+            } else {
+                document.getElementById("settingsAccountName").textContent = "Spotify 已登录";
+                document.getElementById("settingsAccountTier").textContent = "Spotify 账号";
             }
 
             // 2. 并行拉取首页 + 音乐库全量分页
@@ -2279,7 +2305,8 @@
     window.onNativeLoginSuccess = function (loggedIn) {
         if (loggedIn) {
             state.accessToken = "";
-            syncSpotifyData(true);
+            state.tokenIsAnon = true;
+            syncSpotifyData(true, true);
         } else {
             renderLoggedOutUI();
         }
@@ -2346,7 +2373,7 @@
 
         // 音乐库固定入口与刷新
         document.getElementById("libRowLiked").addEventListener("click", () => openLikedSongsDetail());
-        document.getElementById("btnSyncLibrary").addEventListener("click", () => syncSpotifyData(true));
+        document.getElementById("btnSyncLibrary").addEventListener("click", () => syncSpotifyData(true, true));
 
         // 歌单详情页全部播放（支持播放筛选后的结果，对齐上游 v0.4.30）
         document.getElementById("btnPlayAllInHero").addEventListener("click", () => {
@@ -2472,7 +2499,7 @@
                 }
             }
         });
-        document.getElementById("btnActionSync").addEventListener("click", () => syncSpotifyData(true));
+        document.getElementById("btnActionSync").addEventListener("click", () => syncSpotifyData(true, true));
         document.getElementById("btnActionLogout").addEventListener("click", () => {
             Native.logout();
             renderLoggedOutUI();

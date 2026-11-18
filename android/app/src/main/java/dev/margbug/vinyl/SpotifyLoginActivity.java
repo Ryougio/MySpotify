@@ -186,9 +186,12 @@ public class SpotifyLoginActivity extends AppCompatActivity {
                         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
                         prefs.edit()
                                 .putString(KEY_SP_DC, text)
-                                .putString(KEY_ALL_COOKIES, "sp_dc=" + text + "; Domain=.spotify.com; Path=/")
-                                .apply();
-                        Toast.makeText(this, "Cookie 导入成功，正在进入...", Toast.LENGTH_SHORT).show();
+                                .putString(KEY_ALL_COOKIES, "sp_dc=" + text)
+                                .remove(KEY_ACCESS_TOKEN)
+                                .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON)
+                                .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES)
+                                .commit();
+                        Toast.makeText(this, "Cookie 导入成功，正在同步...", Toast.LENGTH_SHORT).show();
                         completeLogin();
                     } else {
                         Toast.makeText(this, "输入的 Cookie 不能为空", Toast.LENGTH_SHORT).show();
@@ -208,11 +211,15 @@ public class SpotifyLoginActivity extends AppCompatActivity {
         if (cookies != null && cookies.contains("sp_dc=")) {
             String spDc = extractCookieValue(cookies, "sp_dc");
             if (spDc != null && !spDc.isEmpty()) {
+                CookieManager.getInstance().flush();
                 SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
                 prefs.edit()
                         .putString(KEY_SP_DC, spDc)
-                        .putString(KEY_ALL_COOKIES, cookies)
-                        .apply();
+                        .putString(KEY_ALL_COOKIES, "sp_dc=" + spDc)
+                        .remove(KEY_ACCESS_TOKEN)
+                        .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON)
+                        .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES)
+                        .commit();
 
                 if (currentUrl != null && currentUrl.contains("open.spotify.com")) {
                     handler.postDelayed(this::completeLogin, 800);

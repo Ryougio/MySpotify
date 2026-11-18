@@ -32,7 +32,13 @@ public class WebAppInterface {
                 .remove(SpotifyLoginActivity.KEY_SP_DC)
                 .remove(SpotifyLoginActivity.KEY_ALL_COOKIES)
                 .remove(SpotifyLoginActivity.KEY_ACCESS_TOKEN)
-                .apply();
+                .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON)
+                .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES)
+                .commit();
+        try {
+            android.webkit.CookieManager.getInstance().removeAllCookies(null);
+            android.webkit.CookieManager.getInstance().flush();
+        } catch (Exception ignored) {}
         activity.runOnUiThread(() -> {
             showToast("已退出登录，恢复访客模式");
             webView.evaluateJavascript("if (window.onNativeLoginSuccess) window.onNativeLoginSuccess(false);", null);
@@ -42,6 +48,13 @@ public class WebAppInterface {
     @JavascriptInterface
     public String getSavedAccessToken() {
         SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        String spDc = prefs.getString(SpotifyLoginActivity.KEY_SP_DC, null);
+        boolean isLoggedIn = spDc != null && !spDc.trim().isEmpty();
+        boolean isAnon = prefs.getBoolean(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON, true);
+        long expires = prefs.getLong(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES, 0);
+        // Never return a stale guest token when user is logged in, or an expired token
+        if (isLoggedIn && isAnon) return "";
+        if (expires > 0 && System.currentTimeMillis() >= expires - 60_000L) return "";
         return prefs.getString(SpotifyLoginActivity.KEY_ACCESS_TOKEN, "");
     }
 
@@ -85,8 +98,11 @@ public class WebAppInterface {
         SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit()
                 .putString(SpotifyLoginActivity.KEY_SP_DC, clean)
-                .putString(SpotifyLoginActivity.KEY_ALL_COOKIES, "sp_dc=" + clean + "; Domain=.spotify.com; Path=/")
-                .apply();
+                .putString(SpotifyLoginActivity.KEY_ALL_COOKIES, "sp_dc=" + clean)
+                .remove(SpotifyLoginActivity.KEY_ACCESS_TOKEN)
+                .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_ANON)
+                .remove(SpotifyApiClient.KEY_ACCESS_TOKEN_EXPIRES)
+                .commit();
         activity.runOnUiThread(() -> {
             showToast("Cookie 导入成功，正在同步账号...");
             webView.evaluateJavascript("if (window.onNativeLoginSuccess) window.onNativeLoginSuccess(true);", null);

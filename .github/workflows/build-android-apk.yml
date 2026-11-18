@@ -75,12 +75,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.38
-          name: "MySpotify Mobile Edition (v0.4.38 - Mobile UI CSS Layout & Placeholder Cover Fix)"
+          tag_name: mobile-v0.4.39
+          name: "MySpotify Mobile Edition (v0.4.39 - Login Token & Client-Token Sync Fix)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.38 移动端 UI 彻底修复)
-            - **彻底修复封面撑爆全屏问题**：补全首页推荐橱窗卡片（140×140）、顶部快捷卡片（52×52）、音乐库列表封面（56×56）、歌曲列表缩略图（48×48）、搜索「浏览全部」彩色分类卡片（94px 高 + 倾斜封面）与全屏播放器封面尺寸约束，严格适配手机竖屏布局。
-            - **修复空封面显示「Cover / Album Cover」文字问题**：将迷你播放条、全屏播放页、歌单与艺人默认封面替换为精美 Spotify 暗黑音符矢量占位图，彻底消除破损图标与英文占位文字。
+            ### MySpotify Android 客户端 (v0.4.39 登录后同步 0 首歌与掉登录彻底修复)
+            - **彻底修复登录后同步 0 首歌曲并显示未登录的核心 Bug**：修复访客匿名 Token（`isAnonymous: true`）缓存覆盖已登录凭据的问题；登录或导入 `sp_dc` 后立即清空旧匿名缓存并强制刷新正式用户 Token，不再误用访客 Token 请求歌单。
+            - **补齐 Spotify 官方 `client-token` 认证链路**：完整移植桌面端 `https://clienttoken.spotify.com/v1/clienttoken` 申请与 14 天缓存，所有 Pathfinder 与 `spclient` 请求统一携带 `client-token`，同时支持 TOTP v61/v60/v59 自动降级与纯净 `sp_dc` 请求头。
+            - **防误判掉登录**：保存 `sp_dc` 改用同步 `commit()` 写入并刷盘 WebView Cookie；网络波动时不再误显示为未登录状态。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
