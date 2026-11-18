@@ -611,13 +611,199 @@
     };
 
     // =========================================================================
+    // 5.5 桌面端同款本地持久化快照 (对齐 internal/app/session.go: home.json + session.json)
+    //     实现 0ms 秒开首页/音乐库/歌单/上次播放，后台无感静默刷新
+    // =========================================================================
+    const SNAPSHOT_KEY = "myspotify_home_snapshot_v1";
+    const SESSION_KEY = "myspotify_playback_session_v1";
+    const PL_CACHE_KEY = "myspotify_playlist_cache_v1";
+
+    function saveHomeSnapshot() {
+        try {
+            if (!state.isLoggedIn) {
+                localStorage.removeItem(SNAPSHOT_KEY);
+                return;
+            }
+            const snap = {
+                ts: Date.now(),
+                profile: state.userProfile,
+                homeShortcuts: state.cachedHomeShortcuts || [],
+                homeShelves: state.cachedHomeShelves || [],
+                dailyMixUri: state.dailyMixUri || "",
+                userPlaylists: state.userPlaylists || [],
+                userAlbums: state.userAlbums || [],
+                userArtists: state.userArtists || [],
+                likedTracks: (state.likedTracks || []).slice(0, 600),
+                likedTotalCount: state.likedTotalCount || (state.likedTracks ? state.likedTracks.length : 0)
+            };
+            localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
+        } catch (e) {
+            console.warn("saveHomeSnapshot skipped:", e);
+        }
+    }
+
+    function restoreHomeSnapshot() {
+        try {
+            const status = Native.getLoginStatus();
+            state.isLoggedIn = Boolean(status.isLoggedIn);
+            if (!state.isLoggedIn) return false;
+
+            const raw = localStorage.getItem(SNAPSHOT_KEY);
+            if (!raw) return false;
+            const snap = JSON.parse(raw);
+            if (!snap) return false;
+
+            if (snap.profile) {
+                state.userProfile = snap.profile;
+                renderProfileUI(snap.profile);
+            }
+            if (snap.dailyMixUri) state.dailyMixUri = snap.dailyMixUri;
+            if (Array.isArray(snap.userPlaylists)) state.userPlaylists = snap.userPlaylists;
+            if (Array.isArray(snap.userAlbums)) state.userAlbums = snap.userAlbums;
+            if (Array.isArray(snap.userArtists)) state.userArtists = snap.userArtists;
+            if (Array.isArray(snap.likedTracks)) {
+                state.likedTracks = snap.likedTracks;
+                state.likedTrackIds = new Set(snap.likedTracks.map(t => t.id).filter(Boolean));
+            }
+            state.likedTotalCount = snap.likedTotalCount || state.likedTracks.length;
+
+            const countEl = document.getElementById("libLikedCountText");
+            if (countEl && state.likedTotalCount > 0) {
+                countEl.textContent = `📌 歌单 · ${state.likedTotalCount} 首歌曲`;
+            }
+            renderLibraryView();
+
+            if (Array.isArray(snap.homeShelves) && snap.homeShelves.length > 0) {
+                state.cachedHomeShortcuts = snap.homeShortcuts || [];
+                state.cachedHomeShelves = snap.homeShelves;
+                renderHomeShortcuts(document.getElementById("homeRecentsGrid"), state.cachedHomeShortcuts);
+                renderHomeShelves(document.getElementById("homeDynamicSections"), state.cachedHomeShelves);
+                state.hasRestoredSnapshot = true;
+                return true;
+            }
+        } catch (e) {
+            console.warn("restoreHomeSnapshot failed:", e);
+        }
+        return false;
+    }
+
+    function savePlaybackSession() {
+        try {
+            const sess = {
+                shuffle: Boolean(state.shuffle),
+                repeat: Boolean(state.repeat),
+                crossfadeSec: Number(state.crossfadeSec || 0),
+                currentTrack: state.currentTrack || null,
+                playingFromName: state.playingFromName || "为你推荐",
+                queue: (state.queue || []).slice(0, 80),
+                queueIndex: state.queueIndex || 0
+            };
+            localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+        } catch (e) {}
+    }
+
+    function restorePlaybackSession() {
+        try {
+            const raw = localStorage.getItem(SESSION_KEY);
+            if (!raw) return;
+            const sess = JSON.parse(raw);
+            if (!sess) return;
+
+            // 同步桌面端 v0.4.38 (#47)：持久保留随机与循环设置
+            state.shuffle = Boolean(sess.shuffle);
+            state.repeat = Boolean(sess.repeat);
+            state.crossfadeSec = Number(sess.crossfadeSec || 0);
+            document.getElementById("npBtnShuffle")?.classList.toggle("active", state.shuffle);
+            document.getElementById("npBtnRepeat")?.classList.toggle("active", state.repeat);
+
+            const cfSlider = document.getElementById("crossfadeSlider");
+            const cfLabel = document.getElementById("crossfadeValLabel");
+            if (cfSlider) cfSlider.value = String(state.crossfadeSec);
+            if (cfLabel) cfLabel.textContent = state.crossfadeSec > 0 ? `${state.crossfadeSec} 秒` : "关闭";
+
+            if (sess.currentTrack && sess.currentTrack.title) {
+                state.currentTrack = sess.currentTrack;
+                state.queue = Array.isArray(sess.queue) ? sess.queue : [sess.currentTrack];
+                state.queueIndex = typeof sess.queueIndex === "number" ? sess.queueIndex : 0;
+                state.playingFromName = sess.playingFromName || "为你推荐";
+                state.duration = sess.currentTrack.durationMs ? sess.currentTrack.durationMs / 1000 : 0;
+
+                document.getElementById("miniCoverImg").src = sess.currentTrack.cover || FALLBACK_COVER;
+                document.getElementById("miniTitle").textContent = sess.currentTrack.title;
+                document.getElementById("miniArtist").textContent = sess.currentTrack.artist || "";
+                document.getElementById("npLargeCoverImg").src = sess.currentTrack.cover || FALLBACK_COVER;
+                document.getElementById("npTrackTitle").textContent = sess.currentTrack.title;
+                document.getElementById("npTrackArtist").textContent = sess.currentTrack.artist || "";
+                document.getElementById("npPlayingFrom").textContent = state.playingFromName;
+                document.getElementById("npTimeDuration").textContent = formatTime(state.duration);
+                syncCurrentTrackLikeIcons();
+            }
+        } catch (e) {}
+    }
+
+    function getCachedPlaylist(uri) {
+        try {
+            const raw = localStorage.getItem(PL_CACHE_KEY);
+            if (!raw) return null;
+            const map = JSON.parse(raw);
+            return map && map[uri] ? map[uri] : null;
+        } catch (e) { return null; }
+    }
+
+    function saveCachedPlaylist(uri, data) {
+        try {
+            const raw = localStorage.getItem(PL_CACHE_KEY);
+            const map = raw ? JSON.parse(raw) : {};
+            map[uri] = {
+                name: data.name,
+                owner: data.owner,
+                cover: data.cover,
+                totalCount: data.totalCount,
+                tracks: (data.tracks || []).slice(0, 300),
+                ts: Date.now()
+            };
+            // 最多缓存最近打开的 20 个歌单/专辑，避免超过存储上限
+            const keys = Object.keys(map).sort((a, b) => (map[b].ts || 0) - (map[a].ts || 0));
+            if (keys.length > 20) {
+                for (const k of keys.slice(20)) delete map[k];
+            }
+            localStorage.setItem(PL_CACHE_KEY, JSON.stringify(map));
+        } catch (e) {}
+    }
+
+    function renderHomeShelves(container, shelves) {
+        if (!container) return;
+        if (!shelves || shelves.length === 0) {
+            container.innerHTML = `<div class="sp-loading-box">${state.isLoggedIn ? "当前分类暂无推荐内容，可点击上方排行榜或浏览探索" : "登录后解锁 Spotify 个性化为你推荐，或点击上方「排行榜 / 浏览」直接探索"}</div>`;
+            return;
+        }
+        container.innerHTML = "";
+        for (const shelf of shelves) {
+            const secEl = document.createElement("section");
+            secEl.className = "sp-shelf-section";
+            secEl.innerHTML = `<h2 class="sp-shelf-title">${escapeHtml(shelf.title)}</h2><div class="sp-shelf-scroll"></div>`;
+            const scrollEl = secEl.querySelector(".sp-shelf-scroll");
+            for (const item of shelf.items) {
+                scrollEl.appendChild(createEntityCard(item));
+            }
+            container.appendChild(secEl);
+        }
+    }
+
+    // =========================================================================
     // 6. 首页 HomeFeed (修复问题3 & 问题5：全部/音乐/播客 + 真实个性化推荐)
     // =========================================================================
     async function loadHomeFeed(facet = "") {
+        const isSwitchingFacet = state.homeFacet !== facet;
         state.homeFacet = facet;
         const container = document.getElementById("homeDynamicSections");
         const recentsGrid = document.getElementById("homeRecentsGrid");
-        container.innerHTML = `<div class="sp-loading-box">正在加载 Spotify ${facet === "podcasts-chip" ? "播客" : facet === "music-chip" ? "音乐" : "为你推荐"}...</div>`;
+        const hasRenderedContent = container && container.querySelector(".sp-shelf-section") !== null;
+
+        // 仅当切换过滤分类或当前完全没有缓存内容时，才显示加载中占位（避免每次打开闪屏）
+        if (isSwitchingFacet || !hasRenderedContent) {
+            container.innerHTML = `<div class="sp-loading-box">正在加载 Spotify ${facet === "podcasts-chip" ? "播客" : facet === "music-chip" ? "音乐" : "为你推荐"}...</div>`;
+        }
 
         try {
             const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
@@ -697,36 +883,30 @@
                 try { localStorage.setItem("cached_daily_mix_uri", foundDaily); } catch (e) {}
             }
 
-            // 渲染顶部 2 列快捷网格
+            // 渲染顶部 2 列快捷网格与全部推荐橱窗
             renderHomeShortcuts(recentsGrid, shortcuts);
+            renderHomeShelves(container, shelves);
 
-            // 渲染全部推荐橱窗
-            if (shelves.length === 0) {
-                container.innerHTML = `<div class="sp-loading-box">${state.isLoggedIn ? "当前分类暂无推荐内容，可点击上方排行榜或浏览探索" : "登录后解锁 Spotify 个性化为你推荐，或点击上方「排行榜 / 浏览」直接探索"}</div>`;
-                return;
-            }
-
-            container.innerHTML = "";
-            for (const shelf of shelves) {
-                const secEl = document.createElement("section");
-                secEl.className = "sp-shelf-section";
-                secEl.innerHTML = `<h2 class="sp-shelf-title">${escapeHtml(shelf.title)}</h2><div class="sp-shelf-scroll"></div>`;
-                const scrollEl = secEl.querySelector(".sp-shelf-scroll");
-                for (const item of shelf.items) {
-                    scrollEl.appendChild(createEntityCard(item));
-                }
-                container.appendChild(secEl);
+            // 仅在「全部」视图时更新本地快照，下次打开 0ms 秒开
+            if (facet === "" && shelves.length > 0) {
+                state.cachedHomeShortcuts = shortcuts;
+                state.cachedHomeShelves = shelves;
+                saveHomeSnapshot();
             }
         } catch (err) {
             console.warn("HomeFeed error:", err);
-            renderHomeShortcuts(recentsGrid, []);
-            container.innerHTML = `
-                <div class="sp-loading-box">
-                    <p style="margin-bottom:12px;">加载首页推荐失败：${escapeHtml(err.message || "网络异常")}</p>
-                    <button class="sp-outline-btn" id="btnRetryHome">点击重试</button>
-                </div>
-            `;
-            document.getElementById("btnRetryHome")?.addEventListener("click", () => loadHomeFeed(state.homeFacet));
+            // 如果屏幕上已经有缓存快照内容，静默保留它，绝不清空页面！
+            const alreadyShowing = container && container.querySelector(".sp-shelf-section") !== null;
+            if (!alreadyShowing) {
+                renderHomeShortcuts(recentsGrid, []);
+                container.innerHTML = `
+                    <div class="sp-loading-box">
+                        <p style="margin-bottom:12px;">加载首页推荐失败：${escapeHtml(err.message || "网络异常")}</p>
+                        <button class="sp-outline-btn" id="btnRetryHome">点击重试</button>
+                    </div>
+                `;
+                document.getElementById("btnRetryHome")?.addEventListener("click", () => loadHomeFeed(state.homeFacet));
+            }
         }
     }
 
@@ -1514,13 +1694,17 @@
                 }
             }
 
+            if (syncedAny) {
+                saveHomeSnapshot();
+            }
+
             if (!state.userProfile) {
                 if (syncedAny) {
                     document.getElementById("settingsAccountName").textContent = "Spotify 已登录";
                     document.getElementById("settingsAccountTier").textContent = "已同步";
                 } else {
-                    document.getElementById("settingsAccountName").textContent = "已登录 (同步失败，点击重试)";
-                    document.getElementById("settingsAccountTier").textContent = "网络或代理异常";
+                    document.getElementById("settingsAccountName").textContent = "已登录 (点击立即同步)";
+                    document.getElementById("settingsAccountTier").textContent = "等待同步";
                 }
             }
 
@@ -1531,12 +1715,18 @@
                     const msg = (anyError && anyError.message) || "网络连接断开";
                     Native.toast("同步失败：" + msg + "（建议切换代理节点后重试）");
                 }
+            } else if (!syncedAny && !state.bootRetryScheduled) {
+                // 对齐桌面端 ui_account.go: 启动时若网络未就绪，保留上次快照并在 15 秒后静默重试一次
+                state.bootRetryScheduled = true;
+                setTimeout(() => {
+                    if (state.isLoggedIn && !state.isSyncing) syncSpotifyData(false, false);
+                }, 15000);
             }
         } catch (err) {
             console.error("Sync failed:", err);
             if (!state.userProfile) {
-                document.getElementById("settingsAccountName").textContent = "已登录 (同步失败，点击重试)";
-                document.getElementById("settingsAccountTier").textContent = "网络异常";
+                document.getElementById("settingsAccountName").textContent = "已登录 (点击立即同步)";
+                document.getElementById("settingsAccountTier").textContent = "网络波动";
             }
             if (showToast) Native.toast("同步异常：" + (err.message || "请检查网络或代理节点"));
         } finally {
@@ -1671,6 +1861,10 @@
         state.userPlaylists = [];
         state.userAlbums = [];
         state.userArtists = [];
+        try {
+            localStorage.removeItem(SNAPSHOT_KEY);
+            localStorage.removeItem(PL_CACHE_KEY);
+        } catch (e) {}
 
         document.getElementById("settingsAccountName").textContent = "未登录 (访客模式)";
         document.getElementById("settingsAccountEmail").textContent = "登录 Spotify 同步个人音乐库";
@@ -1774,23 +1968,41 @@
     async function openPlaylistDetail(uri, title, cover) {
         showView("playlist", true);
         state.currentDetailUri = uri;
-        state.currentDetailTracks = [];
+        state.filteredDetailTracks = null;
+        const plFilterIn = document.getElementById("playlistFilterInput");
+        if (plFilterIn) plFilterIn.value = "";
 
         document.getElementById("playlistNavTitle").textContent = title || "歌单";
         document.getElementById("playlistHeroName").textContent = title || "歌单";
         document.getElementById("playlistHeroCover").src = cover || FALLBACK_COVER;
-        document.getElementById("playlistHeroMeta").textContent = "正在全量加载曲目...";
         document.getElementById("btnPlaylistSave").style.display = "none";
         const listEl = document.getElementById("playlistTracksList");
-        listEl.innerHTML = `<div class="sp-loading-box">正在同步歌单全部歌曲...</div>`;
+
+        // 命中本地缓存则 0ms 秒开，随后后台无感刷新
+        const cached = getCachedPlaylist(uri);
+        if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) {
+            state.currentDetailTracks = cached.tracks;
+            if (cached.name) {
+                document.getElementById("playlistNavTitle").textContent = cached.name;
+                document.getElementById("playlistHeroName").textContent = cached.name;
+            }
+            if (cached.cover) document.getElementById("playlistHeroCover").src = cached.cover;
+            document.getElementById("playlistHeroMeta").textContent = `${cached.owner || "Spotify"} · ${cached.tracks.length} 首歌曲`;
+            renderTracksToElement(listEl, cached.tracks, cached.name || title || "歌单");
+        } else {
+            state.currentDetailTracks = [];
+            document.getElementById("playlistHeroMeta").textContent = "正在加载曲目...";
+            listEl.innerHTML = `<div class="sp-loading-box">正在加载歌单歌曲...</div>`;
+        }
 
         try {
             const allTracks = [];
             let offset = 0;
             const limit = 100;
             let totalCount = 0;
-            let plName = title || "歌单";
-            let plOwner = "Spotify";
+            let plName = title || (cached && cached.name) || "歌单";
+            let plOwner = (cached && cached.owner) || "Spotify";
+            let plCover = cover || (cached && cached.cover) || FALLBACK_COVER;
 
             while (offset < 2000) {
                 const res = await gql("fetchPlaylist", {
@@ -1805,7 +2017,7 @@
                 if (offset === 0) {
                     plName = pl.name || plName;
                     plOwner = pl.ownerV2?.data?.name || plOwner;
-                    const plCover = bestImage(pl.images) || cover || FALLBACK_COVER;
+                    plCover = bestImage(pl.images) || plCover;
                     document.getElementById("playlistNavTitle").textContent = plName;
                     document.getElementById("playlistHeroName").textContent = plName;
                     document.getElementById("playlistHeroCover").src = plCover;
@@ -1820,39 +2032,64 @@
                     if (tr) allTracks.push(tr);
                 }
 
-                // 边分页边渲染，避免长歌单白屏
                 if (state.currentDetailUri !== uri) return;
-                state.currentDetailTracks = allTracks;
-                document.getElementById("playlistHeroMeta").textContent = `${plOwner} · ${allTracks.length} / ${Math.max(totalCount, allTracks.length)} 首歌曲`;
-                renderTracksToElement(listEl, allTracks, plName);
+                if (allTracks.length > 0) {
+                    state.currentDetailTracks = allTracks;
+                    document.getElementById("playlistHeroMeta").textContent = `${plOwner} · ${allTracks.length} / ${Math.max(totalCount, allTracks.length)} 首歌曲`;
+                    renderTracksToElement(listEl, allTracks, plName);
+                }
 
                 offset += items.length;
                 if (items.length === 0 || offset >= totalCount) break;
             }
 
             if (state.currentDetailUri === uri) {
-                document.getElementById("playlistHeroMeta").textContent = `${plOwner} · ${allTracks.length} 首歌曲`;
-                if (allTracks.length === 0) {
+                if (allTracks.length > 0) {
+                    document.getElementById("playlistHeroMeta").textContent = `${plOwner} · ${allTracks.length} 首歌曲`;
+                    saveCachedPlaylist(uri, { name: plName, owner: plOwner, cover: plCover, totalCount: allTracks.length, tracks: allTracks });
+                } else if (!cached || cached.tracks.length === 0) {
+                    document.getElementById("playlistHeroMeta").textContent = `${plOwner} · 0 首歌曲`;
                     listEl.innerHTML = `<div class="sp-loading-box">该歌单暂无可播放曲目</div>`;
                 }
             }
         } catch (err) {
-            listEl.innerHTML = `<div class="sp-loading-box">加载歌单失败：${escapeHtml(err.message)}</div>`;
+            // 如果已经展示了缓存歌单，保持缓存不破坏界面！
+            if (state.currentDetailTracks.length === 0) {
+                document.getElementById("playlistHeroMeta").textContent = "加载失败";
+                listEl.innerHTML = `
+                    <div class="sp-loading-box">
+                        <p style="margin-bottom:12px;">加载歌单失败：${escapeHtml(err.message || "网络断开")}</p>
+                        <button class="sp-outline-btn" id="btnRetryPlaylist">点击重试</button>
+                    </div>
+                `;
+                document.getElementById("btnRetryPlaylist")?.addEventListener("click", () => openPlaylistDetail(uri, title, cover));
+            }
         }
     }
 
     async function openAlbumDetail(uri, title, cover) {
         showView("playlist", true);
         state.currentDetailUri = uri;
-        state.currentDetailTracks = [];
+        state.filteredDetailTracks = null;
+        const plFilterIn = document.getElementById("playlistFilterInput");
+        if (plFilterIn) plFilterIn.value = "";
 
         document.getElementById("playlistNavTitle").textContent = title || "专辑";
         document.getElementById("playlistHeroName").textContent = title || "专辑";
         document.getElementById("playlistHeroCover").src = cover || FALLBACK_COVER;
-        document.getElementById("playlistHeroMeta").textContent = "正在加载专辑...";
         document.getElementById("btnPlaylistSave").style.display = "none";
         const listEl = document.getElementById("playlistTracksList");
-        listEl.innerHTML = `<div class="sp-loading-box">正在加载专辑曲目...</div>`;
+
+        const cached = getCachedPlaylist(uri);
+        if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) {
+            state.currentDetailTracks = cached.tracks;
+            document.getElementById("playlistHeroMeta").textContent = `${cached.owner || "专辑"} · ${cached.tracks.length} 首歌曲`;
+            renderTracksToElement(listEl, cached.tracks, cached.name || title || "专辑");
+        } else {
+            state.currentDetailTracks = [];
+            document.getElementById("playlistHeroMeta").textContent = "正在加载专辑...";
+            listEl.innerHTML = `<div class="sp-loading-box">正在加载专辑曲目...</div>`;
+        }
 
         try {
             const allTracks = [];
@@ -1892,11 +2129,22 @@
             }
 
             if (state.currentDetailUri !== uri) return;
-            state.currentDetailTracks = allTracks;
-            document.getElementById("playlistHeroMeta").textContent = `${albArtist || "专辑"} · ${allTracks.length} 首歌曲`;
-            renderTracksToElement(listEl, allTracks, albName);
+            if (allTracks.length > 0) {
+                state.currentDetailTracks = allTracks;
+                document.getElementById("playlistHeroMeta").textContent = `${albArtist || "专辑"} · ${allTracks.length} 首歌曲`;
+                renderTracksToElement(listEl, allTracks, albName);
+                saveCachedPlaylist(uri, { name: albName, owner: albArtist || "专辑", cover: albCover, totalCount: allTracks.length, tracks: allTracks });
+            }
         } catch (err) {
-            listEl.innerHTML = `<div class="sp-loading-box">加载专辑失败：${escapeHtml(err.message)}</div>`;
+            if (state.currentDetailTracks.length === 0) {
+                listEl.innerHTML = `
+                    <div class="sp-loading-box">
+                        <p style="margin-bottom:12px;">加载专辑失败：${escapeHtml(err.message || "网络断开")}</p>
+                        <button class="sp-outline-btn" id="btnRetryAlbum">点击重试</button>
+                    </div>
+                `;
+                document.getElementById("btnRetryAlbum")?.addEventListener("click", () => openAlbumDetail(uri, title, cover));
+            }
         }
     }
 
@@ -2088,6 +2336,7 @@
         updateScrubberVisual(0);
         syncCurrentTrackLikeIcons();
         updatePlayPauseIcons(true);
+        savePlaybackSession();
 
         // 异步加载高精歌词
         loadTrackLyrics(track);
@@ -2102,6 +2351,7 @@
             const audioRes = await Native.resolveAudioUrl(track.title, track.artist);
             if (audioRes && audioRes.audioUrl) {
                 if (qualityBadge) qualityBadge.textContent = "256k";
+                state.audioLoadedId = track.id || track.title;
                 Native.playAudio(audioRes.audioUrl, track.title, track.artist, track.cover || "");
             } else {
                 if (qualityBadge) qualityBadge.style.display = "none";
@@ -2474,6 +2724,8 @@
             if (state.isPlaying) {
                 Native.pauseAudio();
                 updatePlayPauseIcons(false);
+            } else if (state.audioLoadedId !== (state.currentTrack.id || state.currentTrack.title)) {
+                playTrack(state.currentTrack, state.queue, state.queueIndex, state.playingFromName);
             } else {
                 Native.resumeAudio();
                 updatePlayPauseIcons(true);
@@ -2495,13 +2747,26 @@
         document.getElementById("npBtnShuffle").addEventListener("click", () => {
             state.shuffle = !state.shuffle;
             document.getElementById("npBtnShuffle").classList.toggle("active", state.shuffle);
+            savePlaybackSession();
             Native.toast(state.shuffle ? "已开启随机播放" : "已关闭随机播放");
         });
         document.getElementById("npBtnRepeat").addEventListener("click", () => {
             state.repeat = !state.repeat;
             document.getElementById("npBtnRepeat").classList.toggle("active", state.repeat);
+            savePlaybackSession();
             Native.toast(state.repeat ? "单曲循环" : "列表循环");
         });
+
+        // 交叉淡入淡出 0-12 秒滑块 (同步上游 v0.4.38 #48)
+        const cfSlider = document.getElementById("crossfadeSlider");
+        const cfLabel = document.getElementById("crossfadeValLabel");
+        if (cfSlider) {
+            cfSlider.addEventListener("input", () => {
+                state.crossfadeSec = parseInt(cfSlider.value, 10) || 0;
+                if (cfLabel) cfLabel.textContent = state.crossfadeSec > 0 ? `${state.crossfadeSec} 秒` : "关闭";
+                savePlaybackSession();
+            });
+        }
 
         // 倍速播放切换 (对齐上游 v0.4.28：0.5x ~ 2.0x)
         const SPEEDS = [1.0, 1.25, 1.5, 2.0, 0.5, 0.75];
@@ -2689,7 +2954,10 @@
     function init() {
         bindEvents();
         setupEqualizerUI();
-        syncSpotifyData(false);
+        // 对齐桌面端 internal/app/session.go：0ms 立即恢复上次本地快照与播放状态，再静默后台同步
+        restoreHomeSnapshot();
+        restorePlaybackSession();
+        syncSpotifyData(false, false);
     }
 
     if (document.readyState === "loading") {

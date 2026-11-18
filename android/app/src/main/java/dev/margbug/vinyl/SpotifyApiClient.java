@@ -125,9 +125,11 @@ public class SpotifyApiClient {
         return cachedClient;
     }
 
-    private static synchronized OkHttpClient getDirectFallbackClient() {
-        return new OkHttpClient.Builder()
-                .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+    private static OkHttpClient buildFallbackClient(Proxy proxyOrNull, boolean http1Only, int timeoutSec) {
+        int t = timeoutSec > 0 ? timeoutSec : 15;
+        OkHttpClient.Builder b = new OkHttpClient.Builder()
+                .protocols(http1Only ? java.util.Collections.singletonList(Protocol.HTTP_1_1)
+                        : Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
                 .dns(hostname -> {
                     List<InetAddress> all = Dns.SYSTEM.lookup(hostname);
                     List<InetAddress> v4 = new ArrayList<>();
@@ -136,10 +138,24 @@ public class SpotifyApiClient {
                     }
                     return !v4.isEmpty() ? v4 : all;
                 })
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
+                .connectTimeout(Math.min(t, 10), TimeUnit.SECONDS)
+                .readTimeout(t, TimeUnit.SECONDS)
+                .writeTimeout(t, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
-                .build();
+                .connectionPool(new ConnectionPool(4, 30, TimeUnit.SECONDS));
+        if (proxyOrNull != null) {
+            b.proxy(proxyOrNull);
+        }
+        return b.build();
+    }
+
+    private static boolean isLocalProxyPortOpen(int port) {
+        try (java.net.Socket s = new java.net.Socket()) {
+            s.connect(new InetSocketAddress("127.0.0.1", port), 150);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static class HttpResult {
@@ -152,10 +168,13 @@ public class SpotifyApiClient {
     }
 
     /**
-     * Executes an OkHttp request with automatic retry on transient TLS / EOF connection resets
-     * (common on mobile VPN / Clash TUN nodes).
+     * Executes an OkHttp request with smart multi-transport retry:
+     * 1) Default HTTP/2 + IPv4 client
+     * 2) Evict stale pool + fresh HTTP/1.1 connection
+     * 3) Auto-detect local FlClash/Clash mixed-port (127.0.0.1:7890) to bypass TUN MTU drops
      */
     private static HttpResult executeWithRetry(Request request, int maxAttempts, int timeoutSec) throws IOException {
+        int attempts = Math.max(maxAttempts, 3);
         OkHttpClient client = getHttpClient();
         if (timeoutSec > 0) {
             client = client.newBuilder()
@@ -164,21 +183,40 @@ public class SpotifyApiClient {
                     .build();
         }
         IOException lastEx = null;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try (Response resp = client.newCall(request).execute()) {
+        Request currentReq = request;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            try (Response resp = client.newCall(currentReq).execute()) {
                 String body = resp.body() != null ? resp.body().string() : "";
                 return new HttpResult(resp.code(), body);
             } catch (IOException e) {
                 lastEx = e;
-                android.util.Log.w(TAG, "HTTP attempt " + attempt + "/" + maxAttempts + " failed (" + request.url().host() + "): " + e.getMessage());
-                // If user configured a local proxy that is unreachable, automatically fall back to system VPN/TUN
-                if (attempt == 1 && cachedProxyKey != null && !cachedProxyKey.isEmpty()
-                        && e.getMessage() != null && (e.getMessage().contains("127.0.0.1") || e.getMessage().contains("ECONNREFUSED"))) {
-                    android.util.Log.w(TAG, "Configured proxy unreachable, falling back to direct/TUN IPv4");
-                    client = getDirectFallbackClient();
+                String msg = e.getMessage() != null ? e.getMessage() : "";
+                android.util.Log.w(TAG, "HTTP attempt " + attempt + "/" + attempts + " failed (" + request.url().host() + "): " + msg);
+                try { client.connectionPool().evictAll(); } catch (Exception ignored) {}
+
+                if (attempt == 1) {
+                    if (cachedProxyKey != null && !cachedProxyKey.isEmpty()
+                            && (msg.contains("127.0.0.1") || msg.contains("ECONNREFUSED"))) {
+                        android.util.Log.w(TAG, "Configured proxy unreachable, falling back to direct/TUN IPv4");
+                        client = buildFallbackClient(null, true, timeoutSec);
+                    } else if ((cachedProxyKey == null || cachedProxyKey.isEmpty()) && isLocalProxyPortOpen(7890)) {
+                        // Bypass FlClash tun0 MTU 9000 fragmentation via local mixed-port 127.0.0.1:7890
+                        android.util.Log.d(TAG, "TUN reset detected; retrying via local Clash proxy 127.0.0.1:7890");
+                        client = buildFallbackClient(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 7890)), false, timeoutSec);
+                    } else {
+                        client = buildFallbackClient(parseConfiguredProxy(), true, timeoutSec);
+                    }
+                } else if (attempt == 2) {
+                    // Fresh HTTP/1.1 non-pooled connection
+                    Proxy p = (cachedProxyKey == null || cachedProxyKey.isEmpty()) && isLocalProxyPortOpen(7890)
+                            ? new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 7890))
+                            : parseConfiguredProxy();
+                    client = buildFallbackClient(p, true, timeoutSec);
+                    currentReq = request.newBuilder().header("Connection", "close").build();
                 }
-                if (attempt < maxAttempts) {
-                    try { Thread.sleep(350L * attempt); } catch (InterruptedException ignored) {}
+
+                if (attempt < attempts) {
+                    try { Thread.sleep(300L * attempt); } catch (InterruptedException ignored) {}
                 }
             }
         }

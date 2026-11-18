@@ -419,12 +419,13 @@
                                 <span class="sp-toggle-slider"></span>
                             </label>
                         </div>
-                        <div class="settings-row">
-                            <span class="settings-row-label">跨曲目淡入淡出 (Crossfade)</span>
-                            <label class="sp-toggle">
-                                <input type="checkbox" id="toggleCrossfade" checked>
-                                <span class="sp-toggle-slider"></span>
-                            </label>
+                        <div class="settings-row vertical">
+                            <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                                <span class="settings-row-label">交叉淡入淡出 (Crossfade)</span>
+                                <span id="crossfadeValLabel" style="font-size:13px;font-weight:700;color:#1ed760;">关闭</span>
+                            </div>
+                            <input type="range" id="crossfadeSlider" class="eq-band-slider" style="width:100%;" min="0" max="12" step="1" value="0">
+                            <p class="settings-row-desc">0 秒为关闭，1–12 秒在切歌时平滑过渡（同步桌面端 v0.4.38）</p>
                         </div>
                     </div>
 
@@ -463,7 +464,7 @@
                         <div class="settings-row">
                             <div class="settings-col">
                                 <span class="settings-row-label">MySpotify Mobile</span>
-                                <p class="settings-row-desc">版本 v0.4.37 (同步桌面端全量更新 + 均衡器/音质/每日推荐修复)</p>
+                                <p class="settings-row-desc">版本 v0.4.42 (同步桌面端 v0.4.38 + 本地快照秒开与无感同步)</p>
                             </div>
                             <a href="https://github.com/Ryougio/MySpotify" target="_blank" class="sp-link-green">GitHub</a>
                         </div>
