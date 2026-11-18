@@ -266,14 +266,25 @@ public class WebAppInterface {
         });
     }
 
+    private void dispatchPlaybackService(Intent intent, boolean foreground) {
+        if (foreground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity.startForegroundService(intent);
+        } else {
+            activity.startService(intent);
+        }
+    }
+
     @JavascriptInterface
     public void playSpotifyTrack(String uri, String title, String artist, String album, String coverUrl, long durationMs) {
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.playSpotifyTrack(uri, title, artist, album, coverUrl, durationMs);
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_PLAY_SPOTIFY);
+        intent.putExtra("uri", uri != null ? uri : "");
+        intent.putExtra("title", title != null ? title : "");
+        intent.putExtra("artist", artist != null ? artist : "");
+        intent.putExtra("album", album != null ? album : "");
+        intent.putExtra("coverUrl", coverUrl != null ? coverUrl : "");
+        intent.putExtra("durationMs", durationMs);
+        dispatchPlaybackService(intent, true);
     }
 
     @JavascriptInterface
@@ -283,25 +294,19 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public void playTrack(String url, String title, String artist, String album, String coverUrl) {
-        if (url != null && (url.startsWith("spotify:track:") || url.startsWith("spotify:episode:"))) {
-            playSpotifyTrack(url, title, artist, album, coverUrl, 0);
+        if (url == null || url.isEmpty() || url.equals("null") || url.startsWith("resolve:")
+                || url.startsWith("spotify:track:") || url.startsWith("spotify:episode:")) {
+            playSpotifyTrack(url != null && url.startsWith("spotify:") ? url : "", title, artist, album, coverUrl, 0);
             return;
         }
-        if (url == null || url.isEmpty() || url.equals("null") || url.startsWith("resolve:")) {
-            activity.runOnUiThread(() -> {
-                SpotifyPlayerEngine engine = activity.getPlayerEngine();
-                if (engine != null) {
-                    engine.playSpotifyTrack("", title, artist, album, coverUrl, 0);
-                }
-            });
-            return;
-        }
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.playDirectUrl(url, title, artist, album, coverUrl);
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_PLAY);
+        intent.putExtra("url", url);
+        intent.putExtra("title", title != null ? title : "");
+        intent.putExtra("artist", artist != null ? artist : "");
+        intent.putExtra("album", album != null ? album : "");
+        intent.putExtra("coverUrl", coverUrl != null ? coverUrl : "");
+        dispatchPlaybackService(intent, true);
     }
 
     @JavascriptInterface
@@ -316,12 +321,10 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public void setCrossfade(int seconds) {
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.setCrossfade(seconds);
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_SET_CROSSFADE);
+        intent.putExtra("seconds", seconds);
+        dispatchPlaybackService(intent, false);
     }
 
     @JavascriptInterface
@@ -347,49 +350,47 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public void pauseTrack() {
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.pause();
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_PAUSE);
+        dispatchPlaybackService(intent, false);
     }
 
     @JavascriptInterface
     public void resumeTrack() {
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.resume();
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_RESUME);
+        dispatchPlaybackService(intent, false);
     }
 
     @JavascriptInterface
     public void seekTo(int positionMs) {
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.seekTo(positionMs);
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_SEEK);
+        intent.putExtra("positionMs", positionMs);
+        dispatchPlaybackService(intent, false);
     }
 
     @JavascriptInterface
     public void setEqualizer(boolean enabled, String gainsJson) {
         try {
+            float[] gains = new float[]{0f, 0f, 0f, 0f, 0f, 0f};
+            if (gainsJson != null && !gainsJson.isEmpty()) {
+                org.json.JSONArray arr = new org.json.JSONArray(gainsJson);
+                for (int i = 0; i < Math.min(6, arr.length()); i++) {
+                    gains[i] = (float) arr.optDouble(i, 0.0);
+                }
+            }
             SharedPreferences prefs = activity.getSharedPreferences(SpotifyLoginActivity.PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit()
                     .putBoolean("eq_enabled", enabled)
                     .putString("eq_gains", gainsJson != null ? gainsJson : "[0,0,0,0,0,0]")
                     .apply();
 
-            activity.runOnUiThread(() -> {
-                SpotifyPlayerEngine engine = activity.getPlayerEngine();
-                if (engine != null) {
-                    engine.setEqualizer(enabled, gainsJson);
-                }
-            });
+            Intent intent = new Intent(activity, MediaPlaybackService.class);
+            intent.setAction(MediaPlaybackService.ACTION_SET_EQ);
+            intent.putExtra("enabled", enabled);
+            intent.putExtra("gains", gains);
+            dispatchPlaybackService(intent, false);
         } catch (Exception ignored) {}
     }
 
@@ -408,12 +409,10 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public void setPlaybackSpeed(float speed) {
-        activity.runOnUiThread(() -> {
-            SpotifyPlayerEngine engine = activity.getPlayerEngine();
-            if (engine != null) {
-                engine.setPlaybackSpeed(speed);
-            }
-        });
+        Intent intent = new Intent(activity, MediaPlaybackService.class);
+        intent.setAction(MediaPlaybackService.ACTION_SET_SPEED);
+        intent.putExtra("speed", speed);
+        dispatchPlaybackService(intent, false);
     }
 
     @JavascriptInterface

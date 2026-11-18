@@ -10,8 +10,8 @@ android {
         applicationId "dev.margbug.vinyl"
         minSdk 24
         targetSdk 34
-        versionCode 446
-        versionName "0.4.46"
+        versionCode 447
+        versionName "0.4.47"
     }
 
     signingConfigs {
@@ -47,4 +47,7 @@ dependencies {
     implementation 'androidx.media:media:1.7.0'
     implementation 'androidx.webkit:webkit:1.11.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    implementation 'androidx.media3:media3-datasource:1.4.1'
 }

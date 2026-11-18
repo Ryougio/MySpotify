@@ -11,7 +11,6 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.FrameLayout;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
@@ -19,13 +18,10 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import org.json.JSONObject;
 
-public class MainActivity extends AppCompatActivity implements
-        MediaPlaybackService.PlaybackEventListener,
-        SpotifyPlayerEngine.UiCallback {
+public class MainActivity extends AppCompatActivity implements MediaPlaybackService.PlaybackEventListener {
 
     private WebView webView;
     private WebAppInterface webAppInterface;
-    private SpotifyPlayerEngine playerEngine;
     private ActivityResultLauncher<Intent> loginLauncher;
     private long lastBackPressTime = 0;
 
@@ -54,19 +50,8 @@ public class MainActivity extends AppCompatActivity implements
         window.setStatusBarColor(Color.parseColor("#121212"));
         window.setNavigationBarColor(Color.parseColor("#121212"));
 
-        FrameLayout rootLayout = new FrameLayout(this);
-        rootLayout.setBackgroundColor(Color.parseColor("#121212"));
-        setContentView(rootLayout);
-
-        // Initialize hidden localhost Widevine EME player engine (mirrors desktop internal/player/web.go)
-        playerEngine = new SpotifyPlayerEngine(this, rootLayout, this);
-
         webView = new WebView(this);
-        webView.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-        ));
-        rootLayout.addView(webView);
+        setContentView(webView);
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -77,7 +62,7 @@ public class MainActivity extends AppCompatActivity implements
         settings.setAllowContentAccess(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.43");
+        settings.setUserAgentString(settings.getUserAgentString().replace("; wv", "") + " MySpotifyDesktopAndroid/0.4.47");
 
         webAppInterface = new WebAppInterface(this, webView);
         webView.addJavascriptInterface(webAppInterface, "AndroidBridge");
@@ -122,10 +107,6 @@ public class MainActivity extends AppCompatActivity implements
         });
 
         MediaPlaybackService.setEventListener(this);
-    }
-
-    public SpotifyPlayerEngine getPlayerEngine() {
-        return playerEngine;
     }
 
     public void launchSpotifyLogin() {
@@ -175,25 +156,6 @@ public class MainActivity extends AppCompatActivity implements
     }
 
     @Override
-    public void onRemoteTogglePlayPause(boolean wantPlay) {
-        runOnUiThread(() -> {
-            if (playerEngine != null) {
-                if (wantPlay) playerEngine.resume();
-                else playerEngine.pause();
-            }
-        });
-    }
-
-    @Override
-    public void onRemoteSeekTo(int positionMs) {
-        runOnUiThread(() -> {
-            if (playerEngine != null) {
-                playerEngine.seekTo(positionMs);
-            }
-        });
-    }
-
-    @Override
     public void onQualityChanged(String badgeText) {
         runOnUiThread(() -> {
             if (webView != null) {
@@ -223,11 +185,7 @@ public class MainActivity extends AppCompatActivity implements
     @Override
     protected void onDestroy() {
         MediaPlaybackService.setEventListener(null);
-        if (playerEngine != null) {
-            playerEngine.destroy();
-            playerEngine = null;
-        }
-        if (webAppInterface != null) {
+        if (isFinishing() && webAppInterface != null) {
             webAppInterface.cleanup();
         }
         super.onDestroy();

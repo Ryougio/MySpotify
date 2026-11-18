@@ -50,6 +50,7 @@ public class SpotifyApiClient {
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final java.util.Map<String, MirrorEntry> mirrorCache = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long MIRROR_TTL_MS = 23L * 60 * 60 * 1000;
+    private static volatile byte[] cachedWidevineCert = null;
 
     private static class MirrorEntry {
         final List<String> urls;
@@ -821,6 +822,37 @@ public class SpotifyApiClient {
                 mainHandler.post(() -> callback.onError(e));
             }
         });
+    }
+
+    /**
+     * Fetches and caches Spotify's Widevine application service certificate (702 bytes)
+     * so Android MediaDrm privacyMode encrypts license requests identically to the Web Player.
+     */
+    public static synchronized byte[] fetchWidevineCertSync(Context context) {
+        if (cachedWidevineCert != null && cachedWidevineCert.length > 0) {
+            return cachedWidevineCert;
+        }
+        try {
+            Identity id = getIdentitySync(context, false);
+            Request.Builder rb = new Request.Builder()
+                    .url("https://spclient.wg.spotify.com/widevine-license/v1/application-certificate")
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", "https://open.spotify.com/")
+                    .get();
+            if (!id.clientToken.isEmpty()) {
+                rb.header("client-token", id.clientToken);
+            }
+            RawHttpResult res = executeRawWithRetry(rb.build(), 3, 12);
+            if (res.code == 200 && res.body != null && res.body.length > 0) {
+                cachedWidevineCert = res.body;
+                android.util.Log.i(TAG, "Cached Widevine serviceCertificate (" + cachedWidevineCert.length + " bytes)");
+                return cachedWidevineCert;
+            }
+            android.util.Log.w(TAG, "fetchWidevineCertSync HTTP " + res.code);
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "fetchWidevineCertSync failed: " + e.getMessage());
+        }
+        return null;
     }
 
     /**

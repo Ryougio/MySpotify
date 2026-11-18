@@ -75,14 +75,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.46
-          name: "MySpotify Mobile Edition (v0.4.46 - Fix AudioFocus Conflict Silencing Widevine Playback)"
+          tag_name: mobile-v0.4.47
+          name: "MySpotify Mobile Edition (v0.4.47 - Native AndroidX Media3 ExoPlayer Widevine Engine)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.46 修复无声/抢占音频焦点版)
-            - **彻底根治「进度条在走但没声音 / 播 10ms 就停」**：
-              - 实机 `dumpsys audio` 抓包发现：`MediaPlaybackService` 在同步通知栏状态时额外调用了 `requestAudioFocus()`，导致 Android 系统立即向同进程内正在播放 Spotify Widevine 音频的 Chromium `AudioFocusDelegate` 发送 `AUDIOFOCUS_LOSS`，瞬间掐断 `AAudio` 输出。
-              - 现已移除 Web Widevine 播放路径下的重复音频焦点抢占，由 Chromium 独占音频焦点，`MediaPlaybackService` 专注负责前台保活、锁屏与通知栏控制。
-            - **固定签名免重登升级**：本版本起直接覆盖安装，保留已有登录状态与本地缓存！
+            ### MySpotify Android 客户端 (v0.4.47 原生 ExoPlayer Widevine 播放引擎)
+            - **彻底根治「拖/点进度条就没声音」与「切后台/息屏停播」**：
+              - 实机 `CCodec` 日志确认：Android WebView 的 Chromium `MediaCodecAudioDecoder` 在对 Widevine 加密 AAC 流执行 seek `flush()` 时会触发 `c2.android.aac.decoder:EncryptedInput createNewBuffer is failed`，导致进度条继续走但音频输出静默；同时切后台/息屏时 WebView 会停止 `AAudio` 甚至触发渲染进程被杀。
+              - **全面升级为 Android 官方流媒体内核 AndroidX Media3 ExoPlayer 1.4.1 + 原生 Widevine DRM**：完全在后台前台服务 [MediaPlaybackService.java](android/app/src/main/java/dev/margbug/vinyl/MediaPlaybackService.java) 内运行，彻底移除隐藏 WebView！
+              - 支持：**丝滑任意拖动进度条不静音、息屏/切后台持续播放、原生 6 段硬件均衡器直接作用于 Spotify 加密流、倍速播放、锁屏与蓝牙切歌、Free 账号自动 128k 降级**。
+            - **免重登直接覆盖升级**：使用固定签名，直接保留账号与本地缓存。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
