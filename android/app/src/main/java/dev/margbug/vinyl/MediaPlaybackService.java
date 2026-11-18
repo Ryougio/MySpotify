@@ -33,6 +33,7 @@ import androidx.media3.common.Player;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager;
 import androidx.media3.exoplayer.drm.DummyExoMediaDrm;
 import androidx.media3.exoplayer.drm.FrameworkMediaDrm;
@@ -178,6 +179,32 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
         exoPlayer.setHandleAudioBecomingNoisy(true);
         exoPlayer.setWakeMode(C.WAKE_MODE_NETWORK);
         exoPlayer.addListener(this);
+        exoPlayer.addAnalyticsListener(new AnalyticsListener() {
+            @Override
+            public void onDrmSessionAcquired(EventTime eventTime, int state) {
+                Log.i(TAG, "Analytics onDrmSessionAcquired state=" + state);
+            }
+            @Override
+            public void onDrmKeysLoaded(EventTime eventTime) {
+                Log.i(TAG, "Analytics onDrmKeysLoaded!");
+            }
+            @Override
+            public void onDrmSessionManagerError(EventTime eventTime, Exception error) {
+                Log.e(TAG, "Analytics onDrmSessionManagerError: " + error.getMessage(), error);
+            }
+            @Override
+            public void onAudioDecoderInitialized(EventTime eventTime, String decoderName, long initializedTimestampMs, long initializationDurationMs) {
+                Log.i(TAG, "Analytics onAudioDecoderInitialized: " + decoderName);
+            }
+            @Override
+            public void onAudioCodecError(EventTime eventTime, Exception audioCodecError) {
+                Log.e(TAG, "Analytics onAudioCodecError: " + audioCodecError.getMessage(), audioCodecError);
+            }
+            @Override
+            public void onAudioSinkError(EventTime eventTime, Exception audioSinkError) {
+                Log.e(TAG, "Analytics onAudioSinkError: " + audioSinkError.getMessage(), audioSinkError);
+            }
+        });
         Log.i(TAG, "Media3 ExoPlayer initialized (audioSessionId=" + exoPlayer.getAudioSessionId() + ")");
     }
 
@@ -396,11 +423,11 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
                     .setUuidAndExoMediaDrmProvider(C.WIDEVINE_UUID, uuid -> {
                         try {
                             FrameworkMediaDrm drm = FrameworkMediaDrm.newInstance(uuid);
+                            String secLevel = "";
                             try {
-                                drm.setPropertyString("securityLevel", "L3");
-                            } catch (Exception e) {
-                                Log.w(TAG, "securityLevel L3 note: " + e.getMessage());
-                            }
+                                secLevel = drm.getPropertyString("securityLevel");
+                            } catch (Exception ignored) {}
+                            Log.i(TAG, "FrameworkMediaDrm native securityLevel=" + secLevel);
                             if (widevineCert != null && widevineCert.length > 0) {
                                 try {
                                     drm.setPropertyString("privacyMode", "enable");
@@ -416,6 +443,7 @@ public class MediaPlaybackService extends Service implements Player.Listener, Lo
                             return new DummyExoMediaDrm();
                         }
                     })
+                    .setPlayClearSamplesWithoutKeys(false)
                     .build(drmCallback);
 
             MediaItem mediaItem = new MediaItem.Builder()

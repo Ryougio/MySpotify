@@ -10,8 +10,8 @@ android {
         applicationId "dev.margbug.vinyl"
         minSdk 24
         targetSdk 34
-        versionCode 447
-        versionName "0.4.47"
+        versionCode 448
+        versionName "0.4.48"
     }
 
     signingConfigs {
