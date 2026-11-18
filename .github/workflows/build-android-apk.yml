@@ -75,14 +75,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.45
-          name: "MySpotify Mobile Edition (v0.4.45 - Inline HLS Widevine Fix + Full Track Guarantee + Persistent Debug Keystore)"
+          tag_name: mobile-v0.4.46
+          name: "MySpotify Mobile Edition (v0.4.46 - Fix AudioFocus Conflict Silencing Widevine Playback)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.45 完整原曲稳定版)
-            - **彻底根治「变成 30 秒试听」的元凶（`Hls is not defined`）**：
-              1. 将 `hls.min.js` 直接内联打包进 `player.html` 单次 HTTP 响应中（[LocalMediaServer.java](android/app/src/main/java/dev/margbug/vinyl/LocalMediaServer.java)），杜绝锁屏/后台启动时外部脚本加载中断导致的 `Hls is not defined` 错误。
-              2. 已登录 Spotify 账号播歌时禁止静默降级为 30 秒 iTunes 试听，始终坚持播放 Spotify 官方 Widevine 完整原曲（并持久化记住 Free 账号 128k 档位，下次冷启动无需再试探 256k 403）。
-            - **固定 APK 调试签名（`android/debug.keystore`）**：从本版本起，后续所有版本更新均可直接覆盖安装，不再卸载清数据、不再需要反复重新登录！
+            ### MySpotify Android 客户端 (v0.4.46 修复无声/抢占音频焦点版)
+            - **彻底根治「进度条在走但没声音 / 播 10ms 就停」**：
+              - 实机 `dumpsys audio` 抓包发现：`MediaPlaybackService` 在同步通知栏状态时额外调用了 `requestAudioFocus()`，导致 Android 系统立即向同进程内正在播放 Spotify Widevine 音频的 Chromium `AudioFocusDelegate` 发送 `AUDIOFOCUS_LOSS`，瞬间掐断 `AAudio` 输出。
+              - 现已移除 Web Widevine 播放路径下的重复音频焦点抢占，由 Chromium 独占音频焦点，`MediaPlaybackService` 专注负责前台保活、锁屏与通知栏控制。
+            - **固定签名免重登升级**：本版本起直接覆盖安装，保留已有登录状态与本地缓存！
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:

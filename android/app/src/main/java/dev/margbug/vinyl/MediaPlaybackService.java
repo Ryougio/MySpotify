@@ -252,6 +252,10 @@ public class MediaPlaybackService extends Service implements
         if (ACTION_SYNC_WEB_STATE.equals(action)) {
             webEngineActive = true;
             stopNativeMediaPlayerQuietly();
+            // CRITICAL: Chromium WebView's AudioFocusDelegate already owns AudioFocus for <audio>!
+            // Never call requestAudioFocus() here or Android MediaFocusControl immediately sends
+            // AUDIOFOCUS_LOSS to Chromium and silences/pauses Widevine audio!
+            abandonAudioFocus();
             String t = intent.getStringExtra("title");
             String a = intent.getStringExtra("artist");
             String al = intent.getStringExtra("album");
@@ -265,7 +269,6 @@ public class MediaPlaybackService extends Service implements
             webDurationMs = intent.getIntExtra("durationMs", webDurationMs);
 
             if (isPlaying) {
-                requestAudioFocus();
                 acquireLocks();
             } else {
                 releaseLocks();
@@ -629,8 +632,11 @@ public class MediaPlaybackService extends Service implements
 
     private void abandonAudioFocus() {
         if (audioManager == null) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (audioFocusRequest != null) {
+                audioManager.abandonAudioFocusRequest(audioFocusRequest);
+                audioFocusRequest = null;
+            }
         } else {
             audioManager.abandonAudioFocus(this);
         }
