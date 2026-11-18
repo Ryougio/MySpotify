@@ -75,16 +75,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.37
-          name: "MySpotify Mobile Edition (v0.4.37 - Upstream Sync: Equalizer, Quality Badge, Daily Mix Fallback, Playlist Filter & Speed)"
+          tag_name: mobile-v0.4.38
+          name: "MySpotify Mobile Edition (v0.4.38 - Mobile UI CSS Layout & Placeholder Cover Fix)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.37 上游全量同步版)
-            - **同步上游 v0.4.37 & v0.4.35（每日推荐防丢与兜底分页）**：修复首页当天无 Daily Mix 导致推荐为空的问题，自动分页检索「为你打造（Made For You）」页面并本地缓存上次每日推荐。
-            - **同步上游 v0.4.36（6 段原生硬件均衡器 + 22 预设）**：基于 Android 原生 `AudioEffect Equalizer`，在「设置 › 均衡器」完整复刻桌面端 6 频段（60Hz~15kHz）与 22 个官方预设（低音增强/人声增强/摇滚/流行/古典/电子/爵士等）。
-            - **同步上游 v0.4.36（音质徽章）**：播放页歌名旁实时展示当前音质标识（`256k` / `HQ`）。
-            - **同步上游 v0.4.30（歌单内快速筛选）**：歌单超过 12 首时自动显示多词空格搜索筛选框，点击播放仅播放筛选匹配队列。
-            - **同步上游 v0.4.28（倍速播放）**：全屏播放页支持 `0.5×` ~ `2.0×` 变速不变调播放。
-            - **包含 v0.4.34 全部移动端增强**：Android 逐级返回栈、触控可拖拽进度条、首页音乐/播客过滤、音乐库专辑/艺人切换、多维度搜索与艺人主页关注、官方排行榜、最近播放及全量分页同步。
+            ### MySpotify Android 客户端 (v0.4.38 移动端 UI 彻底修复)
+            - **彻底修复封面撑爆全屏问题**：补全首页推荐橱窗卡片（140×140）、顶部快捷卡片（52×52）、音乐库列表封面（56×56）、歌曲列表缩略图（48×48）、搜索「浏览全部」彩色分类卡片（94px 高 + 倾斜封面）与全屏播放器封面尺寸约束，严格适配手机竖屏布局。
+            - **修复空封面显示「Cover / Album Cover」文字问题**：将迷你播放条、全屏播放页、歌单与艺人默认封面替换为精美 Spotify 暗黑音符矢量占位图，彻底消除破损图标与英文占位文字。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
