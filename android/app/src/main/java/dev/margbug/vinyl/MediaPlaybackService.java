@@ -95,6 +95,7 @@ public class MediaPlaybackService extends Service implements
     private String loadedCoverUrl = "";
     private Bitmap currentCoverBitmap = null;
     private boolean isPlaying = false;
+    private boolean mediaPlayerPrepared = false;
     private boolean webEngineActive = false;
     private int webPositionMs = 0;
     private int webDurationMs = 0;
@@ -332,6 +333,7 @@ public class MediaPlaybackService extends Service implements
 
     private void stopNativeMediaPlayerQuietly() {
         progressHandler.removeCallbacks(progressRunnable);
+        mediaPlayerPrepared = false;
         if (mediaPlayer != null) {
             try {
                 if (mediaPlayer.isPlaying()) mediaPlayer.stop();
@@ -346,6 +348,7 @@ public class MediaPlaybackService extends Service implements
         requestAudioFocus();
         try {
             initMediaPlayer();
+            mediaPlayerPrepared = false;
             mediaPlayer.reset();
             mediaPlayer.setDataSource(url);
             mediaPlayer.prepareAsync();
@@ -476,6 +479,7 @@ public class MediaPlaybackService extends Service implements
 
     @Override
     public void onPrepared(MediaPlayer mp) {
+        mediaPlayerPrepared = true;
         Log.i(TAG, "MediaPlayer prepared, duration=" + mp.getDuration() + "ms");
         applyEqualizer();
         mp.start();
@@ -507,6 +511,7 @@ public class MediaPlaybackService extends Service implements
     public boolean onError(MediaPlayer mp, int what, int extra) {
         Log.e(TAG, "MediaPlayer onError: what=" + what + " extra=" + extra);
         isPlaying = false;
+        mediaPlayerPrepared = false;
         progressHandler.removeCallbacks(progressRunnable);
         releaseLocks();
         if (eventListener != null) {
@@ -528,7 +533,7 @@ public class MediaPlaybackService extends Service implements
 
     private void updateMediaMetadata() {
         if (mediaSession == null) return;
-        long dur = webEngineActive ? webDurationMs : (mediaPlayer != null ? mediaPlayer.getDuration() : 0);
+        long dur = webEngineActive ? webDurationMs : (mediaPlayer != null && mediaPlayerPrepared ? mediaPlayer.getDuration() : 0);
         MediaMetadataCompat.Builder builder = new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle != null ? currentTitle : "MySpotify")
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist != null ? currentArtist : "")

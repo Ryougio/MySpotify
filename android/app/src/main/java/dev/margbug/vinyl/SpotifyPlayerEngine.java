@@ -51,6 +51,7 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
     private volatile boolean pageReady = false;
     private final List<String> pendingJs = Collections.synchronizedList(new ArrayList<>());
     private final Set<String> downgradedUris = ConcurrentHashMap.newKeySet();
+    private volatile boolean accountFreeOnly = false;
     private final AtomicInteger playRequestSeq = new AtomicInteger(0);
 
     private volatile int activeGen = 0;
@@ -155,14 +156,21 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
         this.activeHasStarted = false;
         this.usingNativeFallback = false;
 
+        // Immediately invalidate previous activeGen so stale error events from an aborted attempt never race
+        int prevGen = this.activeGen;
+        this.activeGen = 0;
+        if (prevGen > 0 && crossfadeSec <= 0) {
+            evalPlayerJs(String.format(Locale.US, "window.vinyl.unload(%d);", prevGen));
+        }
+
         // Immediately sync foreground notification so Android 14+ foreground service starts cleanly
         syncForegroundService(true);
 
         boolean validSpotifyUri = curUri.startsWith("spotify:track:") || curUri.startsWith("spotify:episode:");
         if (isLoggedIn() && validSpotifyUri && server.getPort() > 0) {
-            boolean forceLowest = downgradedUris.contains(curUri);
+            boolean forceLowest = accountFreeOnly || downgradedUris.contains(curUri);
             Log.i(TAG, "Resolving official Spotify stream: uri=" + curUri + " forceLowest=" + forceLowest);
-            SpotifyApiClient.resolveSpotifyMedia(activity, curUri, true, forceLowest, new SpotifyApiClient.MediaCallback() {
+            SpotifyApiClient.resolveSpotifyMedia(activity, curUri, !forceLowest, forceLowest, new SpotifyApiClient.MediaCallback() {
                 @Override
                 public void onSuccess(SpotifyApiClient.SpotifyMedia media) {
                     if (reqId != playRequestSeq.get()) return;
@@ -231,8 +239,15 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
 
     private void retryDowngradedBitrate(int reqId) {
         if (curUri == null || curUri.isEmpty()) return;
-        Log.i(TAG, "License 403 on high bitrate, downgrading to 128k (Free account) for " + curUri);
+        if (reqId != playRequestSeq.get()) return;
+        Log.i(TAG, "License 403 on high bitrate, switching session to 128k (Free account) for " + curUri);
+        accountFreeOnly = true;
         downgradedUris.add(curUri);
+        int oldGen = activeGen;
+        activeGen = 0;
+        if (oldGen > 0) {
+            evalPlayerJs(String.format(Locale.US, "window.vinyl.unload(%d);", oldGen));
+        }
         playSpotifyTrack(curUri, curTitle, curArtist, curAlbum, curCoverUrl, activeDurMs);
     }
 
@@ -397,11 +412,17 @@ public class SpotifyPlayerEngine implements LocalMediaServer.EventListener {
 
     @Override
     public void onLicenseResponse(int gen, int httpCode) {
-        if (gen == activeGen && httpCode == 403 && activeBitrate > 128000 && !downgradedUris.contains(curUri)) {
+        if (gen == activeGen && httpCode == 403 && !accountFreeOnly && activeBitrate > 128000) {
+            // Synchronously invalidate activeGen BEFORE returning HTTP 403 to hls.js
+            // so the resulting hls.js keySystemError event is 100% ignored and never races with iTunes fallback!
+            accountFreeOnly = true;
+            downgradedUris.add(curUri);
+            activeGen = 0;
             int reqId = playRequestSeq.get();
             mainHandler.post(() -> {
-                if (gen == activeGen) {
-                    retryDowngradedBitrate(reqId);
+                if (reqId == playRequestSeq.get()) {
+                    evalPlayerJs(String.format(Locale.US, "window.vinyl.unload(%d);", gen));
+                    playSpotifyTrack(curUri, curTitle, curArtist, curAlbum, curCoverUrl, activeDurMs);
                 }
             });
         }

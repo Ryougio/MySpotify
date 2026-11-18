@@ -10,8 +10,8 @@ android {
         applicationId "dev.margbug.vinyl"
         minSdk 24
         targetSdk 34
-        versionCode 443
-        versionName "0.4.43"
+        versionCode 444
+        versionName "0.4.44"
     }
 
     buildTypes {

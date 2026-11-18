@@ -75,16 +75,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.43
-          name: "MySpotify Mobile Edition (v0.4.43 - Official Spotify Widevine EME Audio Engine + Bridge & ForegroundService Fix)"
+          tag_name: mobile-v0.4.44
+          name: "MySpotify Mobile Edition (v0.4.44 - Fix Widevine 403 Downgrade Race & MediaPlayer -38 Error)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.43 官方 Widevine 原生流媒体播放引擎版)
-            - **彻底修复「歌加载出来了还是放不了」三大根因**：
-              1. **移植桌面端官方 Spotify Widevine EME + HLS.js 播放引擎**（完整对齐 `internal/spotify/media.go`、`mirrors.go`、`internal/player/web.go` + `player.html` + `hls.min.js`）：内置本地 `127.0.0.1` 媒体与 Widevine DRM 授权代理服务（支持 256k/128k 自动降级适配 Free 与 Premium 账号、CDN 多镜像自动切换、交叉淡入淡出 0-12 秒、倍速播放），彻底告别已失效跳转 `/404` 的网易云外链！
-              2. **修复 JS-Android 桥接方法名不匹配**：统一导出 `playSpotifyTrack` / `playAudio` / `pauseAudio` / `resumeAudio` / `setCrossfade`，消除点击歌曲后静默未触发原生播放的缺陷。
-              3. **修复 Android 14/15 前台播放服务启动时机与错误静默**：`MediaPlaybackService` 在 `onStartCommand` 立即启动前台通知并完整回传播放错误与锁屏控制。
-            - **访客模式与异常降级**：未登录或非 Spotify 曲目自动回退至全球可用的 Apple iTunes HTTPS 试听流，不再返回 404 或假音频。
-            - **网络异常诊断优化**：优化 `getServerTime` 快速回退，避免 `open.spotify.com` 握手重置拖慢同步，并在手动同步失败时清晰提示 FlClash Spotify 分流节点排查方向。
+            ### MySpotify Android 客户端 (v0.4.44 Widevine 极速秒播修复版)
+            - **彻底消除 `what=-38, extra=0` 报错与双音轨竞态**：
+              1. 修复 Free 账号在 256k 授权返回 `403` 自动降级 128k 时，旧 `hls.js` 实例报错竞态误触发 iTunes 备用 `MediaPlayer` 的问题——现在在返回 403 前同步作废旧 `gen` 并全局记住 Free 账号 128k 档位，切歌 **~1.5 秒直出 Spotify 官方原曲**，零报错弹窗。
+              2. 修复 `MediaPlaybackService` 在 `prepareAsync()` 完成前调用 `getDuration()` 导致的 `MediaPlayer onError(what=-38, extra=0)` 状态错误。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
