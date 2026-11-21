@@ -113,6 +113,7 @@ public class SpotifyApiClient {
     }
 
     private static volatile OkHttpClient cachedClient;
+    private static volatile OkHttpClient directCdnClient;
     private static volatile String cachedProxyKey = "";
 
     private static final String[][] TOTP_SECRETS = {
@@ -221,13 +222,62 @@ public class SpotifyApiClient {
         }
     }
 
-    private static class HttpResult {
-        final int code;
-        final String body;
-        HttpResult(int code, String body) {
-            this.code = code;
-            this.body = body;
+    private static synchronized OkHttpClient getDirectCdnClient() {
+        if (directCdnClient != null) {
+            return directCdnClient;
         }
+        directCdnClient = new OkHttpClient.Builder()
+                .proxy(Proxy.NO_PROXY)
+                .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+                .dns(hostname -> {
+                    List<InetAddress> all = Dns.SYSTEM.lookup(hostname);
+                    List<InetAddress> v4 = new ArrayList<>();
+                    for (InetAddress addr : all) {
+                        if (addr instanceof Inet4Address) v4.add(addr);
+                    }
+                    return !v4.isEmpty() ? v4 : all;
+                })
+                .connectTimeout(4, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .connectionPool(new ConnectionPool(6, 60, TimeUnit.SECONDS))
+                .build();
+        return directCdnClient;
+    }
+
+    /**
+     * Smart media segment fetcher (Scheme 1: CDN Direct-First with Proxy Fallback).
+     * Bypasses proxy for *.scdn.co / Akamai / Fastly to ensure full ISP bandwidth and avoid proxy congestion,
+     * seamlessly falling back to standard proxy client if direct connection fails.
+     */
+    public static RawHttpResult fetchCdnRangeSmart(Request request, int timeoutSec) throws IOException {
+        String host = request.url().host().toLowerCase(Locale.US);
+        boolean isCdn = host.endsWith(".scdn.co") || host.endsWith(".akamaized.net") || host.endsWith(".fastly.net");
+
+        if (isCdn) {
+            try {
+                OkHttpClient direct = getDirectCdnClient();
+                try (Response resp = direct.newCall(request).execute()) {
+                    if (resp.isSuccessful()) {
+                        byte[] bytes = resp.body() != null ? resp.body().bytes() : new byte[0];
+                        return new RawHttpResult(
+                                resp.code(),
+                                bytes,
+                                resp.header("Content-Type"),
+                                resp.header("Content-Range"),
+                                resp.header("Accept-Ranges"),
+                                resp.header("Content-Length")
+                        );
+                    }
+                    android.util.Log.w(TAG, "CDN direct attempt HTTP " + resp.code() + ", falling back to proxy for " + host);
+                }
+            } catch (Exception e) {
+                android.util.Log.d(TAG, "CDN direct attempt failed for " + host + " (" + e.getMessage() + "), falling back to proxy");
+            }
+        }
+
+        return executeRawWithRetry(request, 2, timeoutSec);
     }
 
     /**

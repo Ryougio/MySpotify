@@ -342,7 +342,7 @@ public class LocalMediaServer {
         if (rangeHeader != null && !rangeHeader.isEmpty()) {
             rb.header("Range", rangeHeader);
         }
-        return SpotifyApiClient.executeRawWithRetry(rb.build(), 2, 18);
+        return SpotifyApiClient.fetchCdnRangeSmart(rb.build(), 18);
     }
 
     private void handleWidevineForward(OutputStream out, String method, String targetUrl, byte[] body, int gen) throws IOException {

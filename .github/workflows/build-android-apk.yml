@@ -75,13 +75,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: mobile-v0.4.50
-          name: "MySpotify Mobile Edition (v0.4.50 - Fix Spotify client-token 400 & Widevine Full-Track Playback)"
+          tag_name: mobile-v0.4.51
+          name: "MySpotify Mobile Edition (v0.4.51 - Scheme 1: Smart CDN Direct-First Media Routing)"
           body: |
-            ### MySpotify Android 客户端 (v0.4.50 彻底修复 10 秒后静音与拖动进度条无声)
-            - **定位根因**：`SpotifyApiClient` 请求 `https://clienttoken.spotify.com/v1/clienttoken` 时，OkHttp `RequestBody.create(String, MediaType)` 自动附加了 `Content-Type: application/json; charset=utf-8`，导致 Spotify 服务端返回 `HTTP 400 Bad Request`、`client-token` 始终为空；缺失 `client-token` 时 Spotify Widevine `/audio/license` 仍返回 200 但下发无效密钥，导致前 10 秒明文 Clear Lead 正常、第 10 秒起加密分段及拖动进度条后 AAC 解码持续报 `0x4004 / 0x0005` 并静音。
-            - **核心修复**：改用纯 `application/json` 字节流提交 `clienttoken` 请求并在 `getIdentitySync` 中保证自动补全 `client-token`，同时清理临时调试代码。
-            - **真机验证**：Samsung SM-S9110 实测多首完整曲目与任意拖动（15s / 45s / 69s / 106s / 117s），`clienttoken HTTP 200` + `hasClientToken=true`，`C2SoftAacDec` 零报错、全程清晰有声。
+            ### MySpotify Android 客户端 (v0.4.51 方案一：CDN 智能直连 + 自动回退)
+            - **优化机制**：将音频媒体数据（占总流量 99% 的 `*.scdn.co` / Akamai / Fastly）与元数据/鉴权分流。音频分片优先尝试直连（`Proxy.NO_PROXY`），直连成功则不占用代理带宽并消除代理速度瓶颈；直连超时或受阻时（4s超时）自动无缝回退走代理，元数据与 Widevine License 依然稳定走代理。
+            - **回退保障**：如果直连在特定网络环境下效果不佳，随时可一键回退到 v0.4.50。
           files: android/app/build/outputs/apk/debug/*.apk
           generate_release_notes: false
         env:
