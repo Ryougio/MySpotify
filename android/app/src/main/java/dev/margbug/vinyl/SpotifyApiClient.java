@@ -222,6 +222,15 @@ public class SpotifyApiClient {
         }
     }
 
+    private static class HttpResult {
+        final int code;
+        final String body;
+        HttpResult(int code, String body) {
+            this.code = code;
+            this.body = body;
+        }
+    }
+
     private static synchronized OkHttpClient getDirectCdnClient() {
         if (directCdnClient != null) {
             return directCdnClient;
